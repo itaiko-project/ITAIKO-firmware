@@ -74,9 +74,9 @@ void StatusLed::update() {
 
     // 3. Update & Render Ripples
     const float MAX_DIST = (float)m_config.led_count / 2.0f;
-    const float RIPPLE_RADIUS = 3.0f;     // Radius of the light point in LEDs
+    const float RIPPLE_RADIUS = 5.0f;     // Radius of the light point in LEDs
     const float MIN_SPEED = 40.0f;        // Minimum speed to ensure it finishes
-    const float SPEED_DECAY_FACTOR = 8.0f; // Speed = Remaining_Dist * Factor
+    const float SPEED_DECAY_FACTOR = 6.0f; // Speed = Remaining_Dist * Factor
 
     for (auto it = m_ripples.begin(); it != m_ripples.end();) {
         // Ease-Out Physics: Move faster when further from destination
