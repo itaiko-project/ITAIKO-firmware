@@ -24,10 +24,6 @@ namespace Doncon::Utils {
  * - Send "1004" to reboot to BOOTSEL mode
  * - Send "2000" to start streaming sensor data (CSV format)
  * - Send "2001" to stop streaming sensor data
- * - Send "3000" to start custom boot screen bitmap upload
- * - Send "3001" + binary data to upload bitmap chunk (chunked transfer)
- * - Send "3002" to finalize and save custom bitmap to flash
- * - Send "3003" to clear custom bitmap (reset to default)
  * - In write mode, send "key:value" pairs (e.g., "0:800")
  *
  * Configuration Keys (46 total, keys 0-45):
@@ -137,12 +133,6 @@ class SerialConfig {
     uint32_t m_ka_right_sum;
     uint32_t m_sample_count;
 
-    // Bitmap upload state
-    bool m_bitmap_upload_mode;
-    uint8_t m_bitmap_buffer[1280];
-    uint32_t m_bitmap_bytes_received;
-    uint32_t m_bitmap_expected_size;
-
     enum class Command : int {
         ReadAll = 1000,
         SaveToFlash = 1001,
@@ -152,10 +142,6 @@ class SerialConfig {
         StartStreaming = 2000,
         StopStreaming = 2001,
         StartInputStreaming = 2002,
-        StartBitmapUpload = 3000,
-        UploadBitmapChunk = 3001,
-        FinalizeBitmap = 3002,
-        ClearBitmap = 3003,
     };
 
     void handleCommand(int command_value);

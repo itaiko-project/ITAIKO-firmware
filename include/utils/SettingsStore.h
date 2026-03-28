@@ -40,16 +40,11 @@ class SettingsStore {
                 DrumKeys drum_keys_p2;
                 ControllerKeys controller_keys;
                 Peripherals::Drum::Config::AdcChannels adc_channels;
-                bool has_custom_bitmap;
             };
             uint8_t raw[m_store_size];
         };
     };
     static_assert(sizeof(Storecache) == m_store_size);
-
-    // Custom bitmap storage configuration
-    const static uint32_t m_bitmap_size = 1280;                              // Enough for 128x64 BMP with headers
-    const static uint32_t m_bitmap_offset = m_flash_offset + (4 * m_store_size); // Pages 4-9 (after settings pages 0-3)
 
     enum class RebootType : uint8_t {
         None,
@@ -121,13 +116,6 @@ class SettingsStore {
 
     void store();
     void reset();
-
-    // Custom bitmap management
-    [[nodiscard]] bool hasCustomBitmap() const;
-    void setCustomBitmap(const uint8_t *data, uint32_t size);
-    void getCustomBitmap(uint8_t *buffer, uint32_t buffer_size) const;
-    void clearCustomBitmap();
-    [[nodiscard]] uint32_t getCustomBitmapSize() const;
 };
 } // namespace Doncon::Utils
 

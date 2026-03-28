@@ -16,63 +16,11 @@ uint32_t s_serial_buf_idx = 0;
 SerialConfig::SerialConfig(SettingsStore &settings_store, SettingsAppliedCallback on_settings_applied)
     : m_settings_store(settings_store), m_on_settings_applied(on_settings_applied), m_write_mode(false),
       m_write_count(0), m_streaming_mode(false), m_input_streaming_mode(false), m_last_stream_time(0), m_don_left_sum(0), m_ka_left_sum(0),
-      m_don_right_sum(0), m_ka_right_sum(0), m_sample_count(0), m_bitmap_upload_mode(false),
-      m_bitmap_bytes_received(0), m_bitmap_expected_size(0) {}
+      m_don_right_sum(0), m_ka_right_sum(0), m_sample_count(0) {}
 
 void SerialConfig::processSerial() {
     if (!tud_cdc_connected()) {
         return;
-    }
-
-    // If in bitmap upload mode, read binary data instead of processing lines
-    if (m_bitmap_upload_mode) {
-        while (tud_cdc_available() && m_bitmap_bytes_received < sizeof(m_bitmap_buffer)) {
-            uint32_t bytes_read = tud_cdc_read(&m_bitmap_buffer[m_bitmap_bytes_received],
-                                                sizeof(m_bitmap_buffer) - m_bitmap_bytes_received);
-            m_bitmap_bytes_received += bytes_read;
-
-            // Once we have the BMP header (first 6 bytes), parse the file size
-            if (m_bitmap_expected_size == 0 && m_bitmap_bytes_received >= 6) {
-                // BMP file size is stored in bytes 2-5 (little-endian uint32)
-                m_bitmap_expected_size = m_bitmap_buffer[2] | (m_bitmap_buffer[3] << 8) |
-                                         (m_bitmap_buffer[4] << 16) | (m_bitmap_buffer[5] << 24);
-
-                // Sanity check
-                if (m_bitmap_expected_size > sizeof(m_bitmap_buffer) || m_bitmap_expected_size < 54) {
-                    m_bitmap_upload_mode = false;
-                    printf("BITMAP_ERROR:INVALID_SIZE\n");
-                    stdio_flush();
-
-                    // Service USB to ensure message gets transmitted
-                    for (int i = 0; i < 10; i++) {
-                        tud_task();
-                    }
-
-                    m_bitmap_bytes_received = 0;
-                    m_bitmap_expected_size = 0;
-                    return;
-                }
-            }
-        }
-
-        // Auto-finalize when all expected bytes received
-        if (m_bitmap_expected_size > 0 && m_bitmap_bytes_received >= m_bitmap_expected_size) {
-            m_bitmap_upload_mode = false;
-            m_settings_store.setCustomBitmap(m_bitmap_buffer, m_bitmap_bytes_received);
-            m_settings_store.store();
-            printf("BITMAP_SAVED:%lu\n", m_bitmap_bytes_received);
-            stdio_flush();
-
-            // Service USB to ensure message gets transmitted immediately
-            for (int i = 0; i < 10; i++) {
-                tud_task();
-            }
-
-            m_bitmap_bytes_received = 0;
-            m_bitmap_expected_size = 0;
-        } else if (m_bitmap_upload_mode) {
-            return; // Still uploading, don't process commands
-        }
     }
 
     // Read characters into our buffer
@@ -151,69 +99,6 @@ void SerialConfig::handleCommand(int command_value) {
         m_input_streaming_mode = false;
         break;
 
-    case Command::StartBitmapUpload:
-        m_bitmap_upload_mode = true;
-        m_bitmap_bytes_received = 0;
-        m_bitmap_expected_size = 0;
-        printf("BITMAP_UPLOAD_READY\n");
-        stdio_flush();
-
-        // Service USB to ensure message gets transmitted
-        for (int i = 0; i < 10; i++) {
-            tud_task();
-        }
-        break;
-
-    case Command::UploadBitmapChunk:
-        // This command is deprecated - binary data is now read automatically in processSerial()
-        // Just report current status for compatibility
-        if (m_bitmap_upload_mode) {
-            printf("CHUNK_RECEIVED:%lu\n", m_bitmap_bytes_received);
-            stdio_flush();
-
-            // Service USB to ensure message gets transmitted
-            for (int i = 0; i < 10; i++) {
-                tud_task();
-            }
-        }
-        break;
-
-    case Command::FinalizeBitmap:
-        if (m_bitmap_upload_mode && m_bitmap_bytes_received > 0) {
-            // Exit upload mode first to allow command processing
-            m_bitmap_upload_mode = false;
-            m_settings_store.setCustomBitmap(m_bitmap_buffer, m_bitmap_bytes_received);
-            m_settings_store.store();
-            printf("BITMAP_SAVED:%lu\n", m_bitmap_bytes_received);
-            stdio_flush();
-
-            // Service USB to ensure message gets transmitted
-            for (int i = 0; i < 10; i++) {
-                tud_task();
-            }
-        } else if (m_bitmap_upload_mode) {
-            m_bitmap_upload_mode = false;
-            printf("BITMAP_ERROR:NO_DATA\n");
-            stdio_flush();
-
-            // Service USB to ensure message gets transmitted
-            for (int i = 0; i < 10; i++) {
-                tud_task();
-            }
-        }
-        break;
-
-    case Command::ClearBitmap:
-        m_settings_store.clearCustomBitmap();
-        m_settings_store.store();
-        printf("BITMAP_CLEARED\n");
-        stdio_flush();
-
-        // Service USB to ensure message gets transmitted
-        for (int i = 0; i < 10; i++) {
-            tud_task();
-        }
-        break;
     }
 }
 

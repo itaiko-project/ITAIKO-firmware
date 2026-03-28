@@ -153,14 +153,7 @@ void Display::drawSplashScreen() {
     // Non-blocking splash screen - just draw it once and record the time
     ssd1306_clear(&m_display);
 
-    // Check if custom bitmap is available
-    if (m_settings_store && m_settings_store->hasCustomBitmap()) {
-        m_settings_store->getCustomBitmap(m_custom_bitmap_buffer.data(), m_custom_bitmap_buffer.size());
-        ssd1306_bmp_show_image(&m_display, m_custom_bitmap_buffer.data(), m_custom_bitmap_buffer.size());
-    } else {
-        // Use default splash screen
-        ssd1306_bmp_show_image(&m_display, splash_screen.data(), splash_screen.size());
-    }
+    ssd1306_bmp_show_image(&m_display, splash_screen.data(), splash_screen.size());
 
     ssd1306_show(&m_display);
     m_splash_start_time = to_ms_since_boot(get_absolute_time());

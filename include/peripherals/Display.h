@@ -55,9 +55,7 @@ class Display {
     bool m_screen_off{false};
     Utils::InputState m_last_input_state{};
 
-    // Custom bitmap support
     std::shared_ptr<Utils::SettingsStore> m_settings_store;
-    std::array<uint8_t, 1280> m_custom_bitmap_buffer;
 
     bool hasActivity(const Utils::InputState &state);
     void drawIdleScreen();
