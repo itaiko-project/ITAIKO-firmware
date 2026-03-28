@@ -163,23 +163,42 @@ int main() {
     Peripherals::Drum drum(drum_config);
 
     Utils::InputState input_state;
-    const auto checkHotkey = [&input_state]() {
+    // True while a start+select combo is in progress; suppresses those buttons
+    // in the USB report without touching input_state itself (so stale queue
+    // frames can't reset the hold timer by replaying suppressed false values).
+    bool suppress_menu_buttons = false;
+    const auto checkHotkey = [&input_state, &suppress_menu_buttons]() {
         static const uint32_t hold_timeout = 2000;
         static uint32_t hold_since = 0;
         static bool hold_active = false;
+        static bool combo_in_progress = false;
 
-        if (input_state.controller.buttons.start && input_state.controller.buttons.select) {
+        const bool start = input_state.controller.buttons.start;
+        const bool select = input_state.controller.buttons.select;
+
+        if (start && select) {
+            combo_in_progress = true;
+            suppress_menu_buttons = true;
+
             const uint32_t now = to_ms_since_boot(get_absolute_time());
             if (!hold_active) {
                 hold_active = true;
                 hold_since = now;
             } else if ((now - hold_since) > hold_timeout) {
                 hold_active = false;
+                combo_in_progress = false;
                 return true;
             }
         } else {
             hold_active = false;
+            if (!start && !select) {
+                combo_in_progress = false;
+            }
+            // Keep suppressing until both are fully released so that releasing
+            // one button before the other doesn't send a stray key press
+            suppress_menu_buttons = combo_in_progress;
         }
+
         return false;
     };
 
