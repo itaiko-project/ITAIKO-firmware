@@ -14,7 +14,8 @@ const std::map<Menu::Page, const Menu::Descriptor> Menu::descriptors = {
        {"Led", Menu::Descriptor::Action::GotoPageLed},            //
        {"Reset", Menu::Descriptor::Action::GotoPageReset},        //
        {"USB Flash", Menu::Descriptor::Action::GotoPageBootsel},  //
-       {"Version", Menu::Descriptor::Action::GotoPageVersion}},   //
+       {"Version", Menu::Descriptor::Action::GotoPageVersion},     //
+       {"PS4 Key", Menu::Descriptor::Action::GotoPagePS4Auth}},   //
       0}},                                                        //
 
     {Menu::Page::Version,                            //
@@ -22,6 +23,13 @@ const std::map<Menu::Page, const Menu::Descriptor> Menu::descriptors = {
       "Firmware Version",                            //
       {{FIRMWARE_VERSION, Menu::Descriptor::Action::None}}, //
       0}},                                           //
+
+    {Menu::Page::PS4Auth,                                      //
+     {Menu::Descriptor::Type::Info,                            //
+      "PS4 Auth Key",                                          //
+      {{"None", Menu::Descriptor::Action::None},               //
+       {"Present", Menu::Descriptor::Action::None}},           //
+      0}},                                                     //
 
     {Menu::Page::DeviceMode,                                 //
      {Menu::Descriptor::Type::Selection,                     //
@@ -362,6 +370,8 @@ uint16_t Menu::getCurrentValue(Menu::Page page) {
     case Page::BootselMsg:
     case Page::Version:
         break;
+    case Page::PS4Auth:
+        return m_store->hasPS4AuthCredentials() ? 1 : 0;
     }
 
     return 0;
@@ -493,6 +503,7 @@ void Menu::gotoParent(bool do_restore) {
         case Page::Bootsel:
         case Page::BootselMsg:
         case Page::Version:
+        case Page::PS4Auth:
             break;
         }
     }
@@ -537,6 +548,9 @@ void Menu::performAction(Descriptor::Action action, uint16_t value) {
         break;
     case Descriptor::Action::GotoPageVersion:
         gotoPage(Page::Version);
+        break;
+    case Descriptor::Action::GotoPagePS4Auth:
+        gotoPage(Page::PS4Auth);
         break;
     case Descriptor::Action::GotoPageDrumDebounceDelay:
         gotoPage(Page::DrumDebounceDelay);
