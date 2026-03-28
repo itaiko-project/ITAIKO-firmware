@@ -13,7 +13,7 @@ namespace {
 constexpr StatusLed::Config::Color TOSU_COLOR_GREAT = {255, 215, 0};   // Gold
 constexpr StatusLed::Config::Color TOSU_COLOR_OK = {200, 200, 200};    // Green
 constexpr StatusLed::Config::Color TOSU_COLOR_MISS = {255, 30, 30};    // Red
-constexpr StatusLed::Config::Color TOSU_COLOR_NEUTRAL = {20, 20, 20};  // Dim gray (before judgment arrives)
+constexpr StatusLed::Config::Color TOSU_COLOR_NEUTRAL = {50, 50, 50};  // Dim gray (before judgment arrives)
 } // namespace
 
 StatusLed::StatusLed(const Config &config) : m_config(config) {
