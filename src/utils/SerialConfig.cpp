@@ -136,6 +136,7 @@ void SerialConfig::handleCommand(int command_value) {
 
     case Command::ClearPS4Auth:
         m_settings_store.clearPS4AuthCredentials();
+        m_settings_store.scheduleReboot(false);
         m_settings_store.store();
         printf("PS4_AUTH_CLEARED\n");
         stdio_flush();
@@ -206,6 +207,7 @@ void SerialConfig::processPS4AuthUpload() {
     }
 
     m_ps4_auth_upload_mode = false;
+    m_settings_store.scheduleReboot(false);
     m_settings_store.store();
     printf("PS4_AUTH_SAVED\n");
     stdio_flush();
