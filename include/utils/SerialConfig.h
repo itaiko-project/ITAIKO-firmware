@@ -24,10 +24,9 @@ namespace Doncon::Utils {
  * - Send "1004" to reboot to BOOTSEL mode
  * - Send "2000" to start streaming sensor data (CSV format)
  * - Send "2001" to stop streaming sensor data
- * - Send "3000" to start custom boot screen bitmap upload
- * - Send "3001" + binary data to upload bitmap chunk (chunked transfer)
- * - Send "3002" to finalize and save custom bitmap to flash
- * - Send "3003" to clear custom bitmap (reset to default)
+ * - Send "4000" to start PS4 auth bundle upload (binary mode, see protocol docs)
+ * - Send "4001" to query PS4 auth presence (returns PS4_AUTH_STATUS:0 or :1)
+ * - Send "4002" to clear stored PS4 auth credentials
  * - In write mode, send "key:value" pairs (e.g., "0:800")
  *
  * Configuration Keys (46 total, keys 0-45):
@@ -137,11 +136,10 @@ class SerialConfig {
     uint32_t m_ka_right_sum;
     uint32_t m_sample_count;
 
-    // Bitmap upload state
-    bool m_bitmap_upload_mode;
-    uint8_t m_bitmap_buffer[1280];
-    uint32_t m_bitmap_bytes_received;
-    uint32_t m_bitmap_expected_size;
+    // PS4 auth upload state
+    bool m_ps4_auth_upload_mode{false};
+    uint32_t m_ps4_auth_bytes_received{0};
+    uint32_t m_ps4_auth_expected_size{0};
 
     enum class Command : int {
         ReadAll = 1000,
@@ -152,14 +150,14 @@ class SerialConfig {
         StartStreaming = 2000,
         StopStreaming = 2001,
         StartInputStreaming = 2002,
-        StartBitmapUpload = 3000,
-        UploadBitmapChunk = 3001,
-        FinalizeBitmap = 3002,
-        ClearBitmap = 3003,
+        StartPS4AuthUpload = 4000,
+        QueryPS4Auth = 4001,
+        ClearPS4Auth = 4002,
     };
 
     void handleCommand(int command_value);
     void handleWriteData(const char *data);
+    void processPS4AuthUpload();
     void sendAllSettings();
     void sendSensorData(uint16_t ka_l, uint16_t don_l, uint16_t don_r, uint16_t ka_r);
     void sendInputData(const InputState &input_state);

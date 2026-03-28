@@ -7,12 +7,27 @@
 #include "pico/multicore.h"
 #include "pico/stdio_usb.h"
 
+#include <cstddef>
+#include <cstring>
+
 namespace Doncon::Utils {
 
 namespace {
 
 uint8_t read_byte(uint32_t offset) {
     return *(reinterpret_cast<uint8_t *>(XIP_BASE + offset)); // NOLINT(performance-no-int-to-ptr)
+}
+
+uint32_t crc32(const uint8_t *data, size_t length) {
+    uint32_t crc = 0xFFFFFFFF;
+    for (size_t i = 0; i < length; ++i) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; ++j) {
+            const uint32_t mask = (crc & 1U) ? 0xEDB88320U : 0U;
+            crc = (crc >> 1U) ^ mask;
+        }
+    }
+    return ~crc;
 }
 
 } // namespace
@@ -35,8 +50,7 @@ SettingsStore::SettingsStore()
                      .drum_keys_p1 = Config::Default::drum_keys_p1,
                      .drum_keys_p2 = Config::Default::drum_keys_p2,
                      .controller_keys = Config::Default::controller_keys,
-                     .adc_channels = Config::Default::drum_config.adc_channels,
-                     .has_custom_bitmap = false}) {
+                     .adc_channels = Config::Default::drum_config.adc_channels}) {
     uint32_t current_page = m_flash_offset + m_flash_size - m_store_size;
     bool found_valid = false;
     for (size_t i = 0; i < m_store_pages; ++i) {
@@ -51,6 +65,20 @@ SettingsStore::SettingsStore()
         m_store_cache = *(reinterpret_cast<Storecache *>(XIP_BASE + current_page)); // NOLINT(performance-no-int-to-ptr)
         m_dirty = false;
     }
+
+    // Load auth credentials from dedicated sector
+    m_auth_store_cache = *(reinterpret_cast<const AuthStorecache *>(XIP_BASE + m_auth_flash_offset)); // NOLINT(performance-no-int-to-ptr)
+    if (!isAuthValid(m_auth_store_cache)) {
+        std::memset(m_auth_store_cache.raw, 0xFF, sizeof(m_auth_store_cache.raw));
+    }
+}
+
+bool SettingsStore::isAuthValid(const AuthStorecache &cache) {
+    if (cache.magic != m_auth_magic || cache.version != m_auth_version || cache.key_len == 0 ||
+        cache.key_len > m_auth_key_max_size) {
+        return false;
+    }
+    return crc32(cache.raw, offsetof(AuthStorecache, crc32)) == cache.crc32;
 }
 
 
@@ -232,28 +260,37 @@ void SettingsStore::setAdcChannels(const Peripherals::Drum::Config::AdcChannels 
 Peripherals::Drum::Config::AdcChannels SettingsStore::getAdcChannels() const { return m_store_cache.adc_channels; }
 
 void SettingsStore::store() {
-    if (m_dirty) {
+    if (m_dirty || m_auth_dirty) {
         multicore_lockout_start_blocking();
         const uint32_t interrupts = save_and_disable_interrupts();
 
-        uint32_t current_page = m_flash_offset;
-        bool do_erase = true;
-        for (size_t i = 0; i < m_store_pages; ++i) {
-            if (read_byte(current_page) == 0xFF) {
-                do_erase = false;
-                break;
+        if (m_dirty) {
+            uint32_t current_page = m_flash_offset;
+            bool do_erase = true;
+            for (size_t i = 0; i < m_store_pages; ++i) {
+                if (read_byte(current_page) == 0xFF) {
+                    do_erase = false;
+                    break;
+                }
+                current_page += m_store_size;
             }
-            current_page += m_store_size;
+
+            if (do_erase) {
+                flash_range_erase(m_flash_offset, m_flash_size);
+                current_page = m_flash_offset;
+            }
+
+            flash_range_program(current_page, reinterpret_cast<uint8_t *>(&m_store_cache), sizeof(m_store_cache));
+            m_dirty = false;
         }
 
-        if (do_erase) {
-            flash_range_erase(m_flash_offset, m_flash_size);
-            current_page = m_flash_offset;
+        if (m_auth_dirty) {
+            flash_range_erase(m_auth_flash_offset, m_auth_flash_size);
+            if (isAuthValid(m_auth_store_cache)) {
+                flash_range_program(m_auth_flash_offset, m_auth_store_cache.raw, sizeof(m_auth_store_cache.raw));
+            }
+            m_auth_dirty = false;
         }
-
-        flash_range_program(current_page, reinterpret_cast<uint8_t *>(&m_store_cache), sizeof(m_store_cache));
-
-        m_dirty = false;
 
         restore_interrupts_from_disabled(interrupts);
         multicore_lockout_end_blocking();
@@ -293,58 +330,41 @@ void SettingsStore::scheduleReboot(const bool bootsel) {
     }
 }
 
-bool SettingsStore::hasCustomBitmap() const { return m_store_cache.has_custom_bitmap; }
-
-void SettingsStore::setCustomBitmap(const uint8_t *data, const uint32_t size) {
-    if (size > m_bitmap_size) {
-        return; // Bitmap too large
+bool SettingsStore::setPS4AuthCredentials(const uint8_t serial[16], const uint8_t signature[256],
+                                          const char *key_pem, const size_t key_pem_len) {
+    if (key_pem == nullptr || key_pem_len == 0 || key_pem_len > m_auth_key_max_size) {
+        return false;
     }
 
-    multicore_lockout_start_blocking();
-    const uint32_t interrupts = save_and_disable_interrupts();
+    std::memset(m_auth_store_cache.raw, 0, sizeof(m_auth_store_cache.raw));
+    m_auth_store_cache.magic = m_auth_magic;
+    m_auth_store_cache.version = m_auth_version;
+    m_auth_store_cache.key_len = static_cast<uint16_t>(key_pem_len);
+    std::memcpy(m_auth_store_cache.serial, serial, 16);
+    std::memcpy(m_auth_store_cache.signature, signature, 256);
+    std::memcpy(m_auth_store_cache.key_pem, key_pem, key_pem_len);
+    m_auth_store_cache.crc32 = crc32(m_auth_store_cache.raw, offsetof(AuthStorecache, crc32));
+    m_auth_dirty = true;
 
-    // Erase the bitmap storage area (need to erase full sectors, so erase 2KB = 8 pages)
-    flash_range_erase(m_bitmap_offset, 2048);
-
-    // Write the bitmap data
-    flash_range_program(m_bitmap_offset, data, size);
-
-    restore_interrupts(interrupts);
-    multicore_lockout_end_blocking();
-
-    // Update the flag and save settings
-    m_store_cache.has_custom_bitmap = true;
-    m_dirty = true;
+    return true;
 }
 
-void SettingsStore::getCustomBitmap(uint8_t *buffer, const uint32_t buffer_size) const {
-    if (!m_store_cache.has_custom_bitmap || buffer_size < m_bitmap_size) {
-        return;
+bool SettingsStore::getPS4AuthCredentials(std::array<uint8_t, 16> &serial, std::array<uint8_t, 256> &signature,
+                                          std::string &key_pem) const {
+    if (!isAuthValid(m_auth_store_cache)) {
+        return false;
     }
-
-    // Read bitmap data from flash
-    const uint8_t *flash_data = reinterpret_cast<const uint8_t *>(XIP_BASE + m_bitmap_offset); // NOLINT(performance-no-int-to-ptr)
-    for (uint32_t i = 0; i < m_bitmap_size && i < buffer_size; ++i) {
-        buffer[i] = flash_data[i];
-    }
+    std::memcpy(serial.data(), m_auth_store_cache.serial, 16);
+    std::memcpy(signature.data(), m_auth_store_cache.signature, 256);
+    key_pem.assign(m_auth_store_cache.key_pem, m_auth_store_cache.key_len);
+    return true;
 }
 
-void SettingsStore::clearCustomBitmap() {
-    if (m_store_cache.has_custom_bitmap) {
-        multicore_lockout_start_blocking();
-        const uint32_t interrupts = save_and_disable_interrupts();
+bool SettingsStore::hasPS4AuthCredentials() const { return isAuthValid(m_auth_store_cache); }
 
-        // Erase the bitmap storage area
-        flash_range_erase(m_bitmap_offset, 2048);
-
-        restore_interrupts(interrupts);
-        multicore_lockout_end_blocking();
-
-        m_store_cache.has_custom_bitmap = false;
-        m_dirty = true;
-    }
+void SettingsStore::clearPS4AuthCredentials() {
+    std::memset(m_auth_store_cache.raw, 0xFF, sizeof(m_auth_store_cache.raw));
+    m_auth_dirty = true;
 }
-
-uint32_t SettingsStore::getCustomBitmapSize() const { return m_bitmap_size; }
 
 } // namespace Doncon::Utils

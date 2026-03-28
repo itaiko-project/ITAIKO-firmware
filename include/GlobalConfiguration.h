@@ -178,8 +178,7 @@ const Peripherals::StatusLed::Config led_config = {
     .don_right_color = {.r = 255, .g = 66, .b = 33},
     .ka_right_color = {.r = 107, .g = 189, .b = 198},
 
-    .led_enable_pin = 25,
-    .led_pin = 29,
+    .led_pin = 15,
     .led_count = 84,
     .is_rgbw = false,
     .reversed = true,

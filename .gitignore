@@ -12,3 +12,7 @@ scripts/serial.txt
 scripts/sig.bin
 lib/mbedtls
 lib/tinyusb
+
+scripts/
+!scripts/generateAuthConfig.py
+!scripts/generateBitmap.py

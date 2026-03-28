@@ -9,11 +9,14 @@
 namespace Doncon::Peripherals {
 
 StatusLed::StatusLed(const Config &config) : m_config(config) {
-    gpio_init(m_config.led_enable_pin);
-    gpio_set_dir(m_config.led_enable_pin, (bool)GPIO_OUT);
-    gpio_put(m_config.led_enable_pin, true);
-
+    // Initialize PIO state machine for WS2812 (this claims the pin for PIO)
     ws2812_init(pio0, config.led_pin, m_config.is_rgbw);
+
+    // Immediately release pin back to SIO for button use (start in idle state)
+    gpio_set_function(m_config.led_pin, GPIO_FUNC_SIO);
+    gpio_set_dir(m_config.led_pin, GPIO_IN);
+    gpio_pull_up(m_config.led_pin);
+
     m_leds.resize(m_config.led_count, 0);
     m_led_states.resize(m_config.led_count, {0.0f, 0.0f, 0.0f});
     m_last_update_time = to_ms_since_boot(get_absolute_time());
@@ -24,6 +27,8 @@ void StatusLed::setEnablePlayerColor(const bool do_enable) { m_config.enable_pla
 
 void StatusLed::setInputState(const Utils::InputState &input_state) { m_input_state = input_state; }
 void StatusLed::setPlayerColor(const Config::Color &color) { m_player_color = color; }
+
+bool StatusLed::isActive() const { return m_active; }
 
 void StatusLed::update() {
     uint32_t now = to_ms_since_boot(get_absolute_time());
@@ -69,9 +74,9 @@ void StatusLed::update() {
 
     // 3. Update & Render Ripples
     const float MAX_DIST = (float)m_config.led_count / 2.0f;
-    const float RIPPLE_RADIUS = 3.0f;     // Radius of the light point in LEDs
+    const float RIPPLE_RADIUS = 5.0f;     // Radius of the light point in LEDs
     const float MIN_SPEED = 40.0f;        // Minimum speed to ensure it finishes
-    const float SPEED_DECAY_FACTOR = 8.0f; // Speed = Remaining_Dist * Factor
+    const float SPEED_DECAY_FACTOR = 6.0f; // Speed = Remaining_Dist * Factor
 
     for (auto it = m_ripples.begin(); it != m_ripples.end();) {
         // Ease-Out Physics: Move faster when further from destination
@@ -164,8 +169,35 @@ void StatusLed::update() {
         size_t index = m_config.reversed ? (m_config.led_count - 1 - i) : i;
         m_leds[index] = ws2812_rgb_to_gamma_corrected_u32pixel(r, g, b);
     }
-    
-    ws2812_put_frame(pio0, m_leds.data(), m_leds.size());
+
+    // 7. Pin-sharing state machine: switch LED data pin between PIO (driving LEDs)
+    //    and SIO (button input) based on whether ripples are active.
+    bool has_ripples = !m_ripples.empty();
+
+    if (has_ripples && !m_active) {
+        // Transition IDLE -> ACTIVE: claim pin for PIO
+        pio_gpio_init(pio0, m_config.led_pin);
+        m_active = true;
+    }
+
+    if (m_active) {
+        // Send frame while active
+        ws2812_put_frame(pio0, m_leds.data(), m_leds.size());
+
+        if (!has_ripples) {
+            // Transition ACTIVE -> IDLE: ripples finished, final "off" frame was just sent.
+            // Wait for PIO transmission to complete before releasing the pin.
+            while (!pio_sm_is_tx_fifo_empty(pio0, 0)) {
+            }
+            sleep_us(350); // Last pixel shift-out (~30us) + WS2812 reset/latch (~300us)
+
+            // Release pin back to SIO for button use
+            gpio_set_function(m_config.led_pin, GPIO_FUNC_SIO);
+            gpio_set_dir(m_config.led_pin, GPIO_IN);
+            gpio_pull_up(m_config.led_pin);
+            m_active = false;
+        }
+    }
 }
 
 } // namespace Doncon::Peripherals

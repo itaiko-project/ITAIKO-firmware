@@ -12,14 +12,15 @@
 #include "utils/SettingsStore.h"
 
 #include "GlobalConfiguration.h"
-#include "PS4AuthConfiguration.h"
 
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
 #include "pico/time.h"
 #include "pico/util/queue.h"
 
+#include <array>
 #include <cstdio>
+#include <string>
 
 using namespace Doncon;
 
@@ -34,6 +35,9 @@ queue_t auth_challenge_queue;
 queue_t auth_signed_challenge_queue;
 
 std::shared_ptr<Utils::SettingsStore> g_settings_store;
+std::string g_ps4_auth_key_pem;
+std::array<uint8_t, Utils::PS4AuthProvider::SERIAL_LENGTH> g_ps4_auth_serial{};
+std::array<uint8_t, Utils::PS4AuthProvider::SIGNATURE_LENGTH> g_ps4_auth_signature{};
 
 enum class ControlCommand : uint8_t {
     SetUsbMode,
@@ -66,10 +70,10 @@ void core1_task() {
     i2c_init(Config::Default::i2c_config.block, Config::Default::i2c_config.speed_hz);
 
     Peripherals::Controller controller(Config::Default::controller_config);
-    //Peripherals::StatusLed led(Config::Default::led_config);
+    Peripherals::StatusLed led(Config::Default::led_config);
     Peripherals::Display display(Config::Default::display_config, g_settings_store);
 
-    Utils::PS4AuthProvider ps4authprovider;
+    Utils::PS4AuthProvider ps4authprovider(g_ps4_auth_key_pem);
     std::array<uint8_t, Utils::PS4AuthProvider::SIGNATURE_LENGTH> auth_challenge{};
 
     Utils::InputState input_state;
@@ -80,6 +84,12 @@ void core1_task() {
 
     while (true) {
         controller.updateInputState(input_state);
+
+        // Mask buttons on pins shared with LED data line while LEDs are driving
+        if (led.isActive()) {
+            input_state.controller.buttons.home = false;
+            input_state.controller.buttons.share = false;
+        }
 
         queue_try_add(&controller_input_queue, &input_state.controller);
         queue_try_remove(&drum_input_queue, &input_state.drum);
@@ -99,10 +109,10 @@ void core1_task() {
                 }
                 break;
             case ControlCommand::SetLedBrightness:
-                //led.setBrightness(control_msg.data.led_brightness);
+                led.setBrightness(control_msg.data.led_brightness);
                 break;
             case ControlCommand::SetLedEnablePlayerColor:
-                //led.setEnablePlayerColor(control_msg.data.led_enable_player_color);
+                led.setEnablePlayerColor(control_msg.data.led_enable_player_color);
                 break;
             case ControlCommand::EnterMenu:
                 display.showMenu();
@@ -117,14 +127,16 @@ void core1_task() {
         }
         if (queue_try_remove(&auth_challenge_queue, auth_challenge.data())) {
             const auto signed_challenge = ps4authprovider.sign(auth_challenge);
-            queue_try_remove(&auth_signed_challenge_queue, nullptr); // clear queue first
-            queue_try_add(&auth_signed_challenge_queue, &signed_challenge);
+            if (signed_challenge) {
+                queue_try_remove(&auth_signed_challenge_queue, nullptr); // clear stale response
+                queue_try_add(&auth_signed_challenge_queue, signed_challenge->data());
+            }
         }
 
-        //led.setInputState(input_state);
+        led.setInputState(input_state);
         display.setInputState(input_state);
 
-        //led.update();
+        led.update();
         display.update();
     }
 }
@@ -200,9 +212,9 @@ int main() {
     Utils::SerialConfig serial_config(*settings_store, readSettings);
 
     std::array<uint8_t, Utils::PS4AuthProvider::SIGNATURE_LENGTH> auth_challenge_response{};
-    if (Config::PS4Auth::config.enabled) {
-        ps4_auth_init(Config::PS4Auth::config.key_pem.c_str(), Config::PS4Auth::config.key_pem.size() + 1,
-                      Config::PS4Auth::config.serial.data(), Config::PS4Auth::config.signature.data(),
+    if (settings_store->getPS4AuthCredentials(g_ps4_auth_serial, g_ps4_auth_signature, g_ps4_auth_key_pem)) {
+        ps4_auth_init(g_ps4_auth_key_pem.c_str(), g_ps4_auth_key_pem.size() + 1, g_ps4_auth_serial.data(),
+                      g_ps4_auth_signature.data(),
                       [](const uint8_t *challenge) { queue_try_add(&auth_challenge_queue, challenge); });
     }
 

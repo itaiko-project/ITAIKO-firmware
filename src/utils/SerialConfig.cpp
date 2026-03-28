@@ -1,5 +1,6 @@
 #include "utils/SerialConfig.h"
 
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -11,67 +12,35 @@ namespace Doncon::Utils {
 namespace {
 char s_serial_buf[512];
 uint32_t s_serial_buf_idx = 0;
+uint8_t s_ps4_auth_buf[4096];
+
+uint32_t crc32(const uint8_t *data, size_t length) {
+    uint32_t crc = 0xFFFFFFFF;
+    for (size_t i = 0; i < length; ++i) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; ++j) {
+            const uint32_t mask = (crc & 1U) ? 0xEDB88320U : 0U;
+            crc = (crc >> 1U) ^ mask;
+        }
+    }
+    return ~crc;
+}
 } // namespace
 
 SerialConfig::SerialConfig(SettingsStore &settings_store, SettingsAppliedCallback on_settings_applied)
     : m_settings_store(settings_store), m_on_settings_applied(on_settings_applied), m_write_mode(false),
       m_write_count(0), m_streaming_mode(false), m_input_streaming_mode(false), m_last_stream_time(0), m_don_left_sum(0), m_ka_left_sum(0),
-      m_don_right_sum(0), m_ka_right_sum(0), m_sample_count(0), m_bitmap_upload_mode(false),
-      m_bitmap_bytes_received(0), m_bitmap_expected_size(0) {}
+      m_don_right_sum(0), m_ka_right_sum(0), m_sample_count(0) {}
 
 void SerialConfig::processSerial() {
     if (!tud_cdc_connected()) {
         return;
     }
 
-    // If in bitmap upload mode, read binary data instead of processing lines
-    if (m_bitmap_upload_mode) {
-        while (tud_cdc_available() && m_bitmap_bytes_received < sizeof(m_bitmap_buffer)) {
-            uint32_t bytes_read = tud_cdc_read(&m_bitmap_buffer[m_bitmap_bytes_received],
-                                                sizeof(m_bitmap_buffer) - m_bitmap_bytes_received);
-            m_bitmap_bytes_received += bytes_read;
-
-            // Once we have the BMP header (first 6 bytes), parse the file size
-            if (m_bitmap_expected_size == 0 && m_bitmap_bytes_received >= 6) {
-                // BMP file size is stored in bytes 2-5 (little-endian uint32)
-                m_bitmap_expected_size = m_bitmap_buffer[2] | (m_bitmap_buffer[3] << 8) |
-                                         (m_bitmap_buffer[4] << 16) | (m_bitmap_buffer[5] << 24);
-
-                // Sanity check
-                if (m_bitmap_expected_size > sizeof(m_bitmap_buffer) || m_bitmap_expected_size < 54) {
-                    m_bitmap_upload_mode = false;
-                    printf("BITMAP_ERROR:INVALID_SIZE\n");
-                    stdio_flush();
-
-                    // Service USB to ensure message gets transmitted
-                    for (int i = 0; i < 10; i++) {
-                        tud_task();
-                    }
-
-                    m_bitmap_bytes_received = 0;
-                    m_bitmap_expected_size = 0;
-                    return;
-                }
-            }
-        }
-
-        // Auto-finalize when all expected bytes received
-        if (m_bitmap_expected_size > 0 && m_bitmap_bytes_received >= m_bitmap_expected_size) {
-            m_bitmap_upload_mode = false;
-            m_settings_store.setCustomBitmap(m_bitmap_buffer, m_bitmap_bytes_received);
-            m_settings_store.store();
-            printf("BITMAP_SAVED:%lu\n", m_bitmap_bytes_received);
-            stdio_flush();
-
-            // Service USB to ensure message gets transmitted immediately
-            for (int i = 0; i < 10; i++) {
-                tud_task();
-            }
-
-            m_bitmap_bytes_received = 0;
-            m_bitmap_expected_size = 0;
-        } else if (m_bitmap_upload_mode) {
-            return; // Still uploading, don't process commands
+    if (m_ps4_auth_upload_mode) {
+        processPS4AuthUpload();
+        if (m_ps4_auth_upload_mode) {
+            return;
         }
     }
 
@@ -151,70 +120,97 @@ void SerialConfig::handleCommand(int command_value) {
         m_input_streaming_mode = false;
         break;
 
-    case Command::StartBitmapUpload:
-        m_bitmap_upload_mode = true;
-        m_bitmap_bytes_received = 0;
-        m_bitmap_expected_size = 0;
-        printf("BITMAP_UPLOAD_READY\n");
+    case Command::StartPS4AuthUpload:
+        m_ps4_auth_upload_mode = true;
+        m_ps4_auth_bytes_received = 0;
+        m_ps4_auth_expected_size = 0;
+        std::memset(s_ps4_auth_buf, 0, sizeof(s_ps4_auth_buf));
+        printf("PS4_AUTH_READY\n");
         stdio_flush();
-
-        // Service USB to ensure message gets transmitted
-        for (int i = 0; i < 10; i++) {
-            tud_task();
-        }
         break;
 
-    case Command::UploadBitmapChunk:
-        // This command is deprecated - binary data is now read automatically in processSerial()
-        // Just report current status for compatibility
-        if (m_bitmap_upload_mode) {
-            printf("CHUNK_RECEIVED:%lu\n", m_bitmap_bytes_received);
-            stdio_flush();
-
-            // Service USB to ensure message gets transmitted
-            for (int i = 0; i < 10; i++) {
-                tud_task();
-            }
-        }
+    case Command::QueryPS4Auth:
+        printf("PS4_AUTH_STATUS:%d\n", m_settings_store.hasPS4AuthCredentials() ? 1 : 0);
+        stdio_flush();
         break;
 
-    case Command::FinalizeBitmap:
-        if (m_bitmap_upload_mode && m_bitmap_bytes_received > 0) {
-            // Exit upload mode first to allow command processing
-            m_bitmap_upload_mode = false;
-            m_settings_store.setCustomBitmap(m_bitmap_buffer, m_bitmap_bytes_received);
-            m_settings_store.store();
-            printf("BITMAP_SAVED:%lu\n", m_bitmap_bytes_received);
-            stdio_flush();
-
-            // Service USB to ensure message gets transmitted
-            for (int i = 0; i < 10; i++) {
-                tud_task();
-            }
-        } else if (m_bitmap_upload_mode) {
-            m_bitmap_upload_mode = false;
-            printf("BITMAP_ERROR:NO_DATA\n");
-            stdio_flush();
-
-            // Service USB to ensure message gets transmitted
-            for (int i = 0; i < 10; i++) {
-                tud_task();
-            }
-        }
-        break;
-
-    case Command::ClearBitmap:
-        m_settings_store.clearCustomBitmap();
+    case Command::ClearPS4Auth:
+        m_settings_store.clearPS4AuthCredentials();
+        m_settings_store.scheduleReboot(false);
         m_settings_store.store();
-        printf("BITMAP_CLEARED\n");
+        printf("PS4_AUTH_CLEARED\n");
         stdio_flush();
-
-        // Service USB to ensure message gets transmitted
-        for (int i = 0; i < 10; i++) {
-            tud_task();
-        }
         break;
     }
+}
+
+void SerialConfig::processPS4AuthUpload() {
+    // Bundle format: "PAK1" (4) | key_len u16 LE (2) | pad (2) | serial (16) | signature (256) | key_pem (key_len) | crc32 (4)
+    while (tud_cdc_available() && m_ps4_auth_bytes_received < sizeof(s_ps4_auth_buf)) {
+        m_ps4_auth_bytes_received +=
+            tud_cdc_read(&s_ps4_auth_buf[m_ps4_auth_bytes_received],
+                         sizeof(s_ps4_auth_buf) - m_ps4_auth_bytes_received);
+
+        if (m_ps4_auth_expected_size == 0 && m_ps4_auth_bytes_received >= 8) {
+            if (std::memcmp(s_ps4_auth_buf, "PAK1", 4) != 0) {
+                m_ps4_auth_upload_mode = false;
+                printf("PS4_AUTH_ERROR:BAD_MAGIC\n");
+                stdio_flush();
+                return;
+            }
+            const uint16_t key_len =
+                static_cast<uint16_t>(s_ps4_auth_buf[4] | (static_cast<uint16_t>(s_ps4_auth_buf[5]) << 8));
+            if (key_len == 0 || key_len > 3584) {
+                m_ps4_auth_upload_mode = false;
+                printf("PS4_AUTH_ERROR:BAD_KEY_LEN\n");
+                stdio_flush();
+                return;
+            }
+            // 4 magic + 2 key_len + 2 pad + 16 serial + 256 sig + key_len pem + 4 crc
+            m_ps4_auth_expected_size = 4 + 2 + 2 + 16 + 256 + key_len + 4;
+            if (m_ps4_auth_expected_size > sizeof(s_ps4_auth_buf)) {
+                m_ps4_auth_upload_mode = false;
+                printf("PS4_AUTH_ERROR:TOO_LARGE\n");
+                stdio_flush();
+                return;
+            }
+        }
+    }
+
+    if (m_ps4_auth_expected_size == 0 || m_ps4_auth_bytes_received < m_ps4_auth_expected_size) {
+        return; // still receiving
+    }
+
+    // Validate CRC over everything before the last 4 bytes
+    const uint32_t payload_len = m_ps4_auth_expected_size - 4;
+    uint32_t expected_crc = 0;
+    std::memcpy(&expected_crc, &s_ps4_auth_buf[payload_len], 4);
+    const uint32_t actual_crc = crc32(s_ps4_auth_buf, payload_len);
+    if (expected_crc != actual_crc) {
+        m_ps4_auth_upload_mode = false;
+        printf("PS4_AUTH_ERROR:BAD_CRC\n");
+        stdio_flush();
+        return;
+    }
+
+    const uint16_t key_len =
+        static_cast<uint16_t>(s_ps4_auth_buf[4] | (static_cast<uint16_t>(s_ps4_auth_buf[5]) << 8));
+    const uint8_t *serial    = &s_ps4_auth_buf[8];
+    const uint8_t *signature = &s_ps4_auth_buf[8 + 16];
+    const char *key_pem      = reinterpret_cast<const char *>(&s_ps4_auth_buf[8 + 16 + 256]);
+
+    if (!m_settings_store.setPS4AuthCredentials(serial, signature, key_pem, key_len)) {
+        m_ps4_auth_upload_mode = false;
+        printf("PS4_AUTH_ERROR:STORE_FAILED\n");
+        stdio_flush();
+        return;
+    }
+
+    m_ps4_auth_upload_mode = false;
+    m_settings_store.scheduleReboot(false);
+    m_settings_store.store();
+    printf("PS4_AUTH_SAVED\n");
+    stdio_flush();
 }
 
 void SerialConfig::handleWriteData(const char *data) {

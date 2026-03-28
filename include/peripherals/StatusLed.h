@@ -24,7 +24,6 @@ class StatusLed {
         Color don_right_color;
         Color ka_right_color;
 
-        uint8_t led_enable_pin;
         uint8_t led_pin;
         uint16_t led_count;
         bool is_rgbw;
@@ -58,6 +57,7 @@ class StatusLed {
     std::vector<Ripple> m_ripples;
     uint32_t m_last_update_time = 0;
     std::vector<uint32_t> m_leds;
+    bool m_active = false;
 
   public:
     StatusLed(const Config &config);
@@ -67,6 +67,8 @@ class StatusLed {
 
     void setInputState(const Utils::InputState &input_state);
     void setPlayerColor(const Config::Color &color);
+
+    bool isActive() const;
 
     void update();
 };

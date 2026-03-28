@@ -54,6 +54,7 @@ class Menu {
         LedEnablePlayerColor,
 
         Version,
+        PS4Auth,
 
         BootselMsg,
     };
@@ -114,6 +115,7 @@ class Menu {
             GotoPageLedEnablePlayerColor,
 
             GotoPageVersion,
+            GotoPagePS4Auth,
 
             SetUsbMode,
 
