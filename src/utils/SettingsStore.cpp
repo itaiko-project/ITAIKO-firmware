@@ -35,8 +35,7 @@ SettingsStore::SettingsStore()
                      .drum_keys_p1 = Config::Default::drum_keys_p1,
                      .drum_keys_p2 = Config::Default::drum_keys_p2,
                      .controller_keys = Config::Default::controller_keys,
-                     .adc_channels = Config::Default::drum_config.adc_channels,
-                     .has_custom_bitmap = false}) {
+                     .adc_channels = Config::Default::drum_config.adc_channels}) {
     uint32_t current_page = m_flash_offset + m_flash_size - m_store_size;
     bool found_valid = false;
     for (size_t i = 0; i < m_store_pages; ++i) {
@@ -292,59 +291,5 @@ void SettingsStore::scheduleReboot(const bool bootsel) {
         m_scheduled_reboot = (bootsel ? RebootType::Bootsel : RebootType::Normal);
     }
 }
-
-bool SettingsStore::hasCustomBitmap() const { return m_store_cache.has_custom_bitmap; }
-
-void SettingsStore::setCustomBitmap(const uint8_t *data, const uint32_t size) {
-    if (size > m_bitmap_size) {
-        return; // Bitmap too large
-    }
-
-    multicore_lockout_start_blocking();
-    const uint32_t interrupts = save_and_disable_interrupts();
-
-    // Erase the bitmap storage area (need to erase full sectors, so erase 2KB = 8 pages)
-    flash_range_erase(m_bitmap_offset, 2048);
-
-    // Write the bitmap data
-    flash_range_program(m_bitmap_offset, data, size);
-
-    restore_interrupts(interrupts);
-    multicore_lockout_end_blocking();
-
-    // Update the flag and save settings
-    m_store_cache.has_custom_bitmap = true;
-    m_dirty = true;
-}
-
-void SettingsStore::getCustomBitmap(uint8_t *buffer, const uint32_t buffer_size) const {
-    if (!m_store_cache.has_custom_bitmap || buffer_size < m_bitmap_size) {
-        return;
-    }
-
-    // Read bitmap data from flash
-    const uint8_t *flash_data = reinterpret_cast<const uint8_t *>(XIP_BASE + m_bitmap_offset); // NOLINT(performance-no-int-to-ptr)
-    for (uint32_t i = 0; i < m_bitmap_size && i < buffer_size; ++i) {
-        buffer[i] = flash_data[i];
-    }
-}
-
-void SettingsStore::clearCustomBitmap() {
-    if (m_store_cache.has_custom_bitmap) {
-        multicore_lockout_start_blocking();
-        const uint32_t interrupts = save_and_disable_interrupts();
-
-        // Erase the bitmap storage area
-        flash_range_erase(m_bitmap_offset, 2048);
-
-        restore_interrupts(interrupts);
-        multicore_lockout_end_blocking();
-
-        m_store_cache.has_custom_bitmap = false;
-        m_dirty = true;
-    }
-}
-
-uint32_t SettingsStore::getCustomBitmapSize() const { return m_bitmap_size; }
 
 } // namespace Doncon::Utils
