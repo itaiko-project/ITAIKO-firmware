@@ -1,5 +1,6 @@
 #include "utils/SerialConfig.h"
 
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -11,6 +12,19 @@ namespace Doncon::Utils {
 namespace {
 char s_serial_buf[512];
 uint32_t s_serial_buf_idx = 0;
+uint8_t s_ps4_auth_buf[4096];
+
+uint32_t crc32(const uint8_t *data, size_t length) {
+    uint32_t crc = 0xFFFFFFFF;
+    for (size_t i = 0; i < length; ++i) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; ++j) {
+            const uint32_t mask = (crc & 1U) ? 0xEDB88320U : 0U;
+            crc = (crc >> 1U) ^ mask;
+        }
+    }
+    return ~crc;
+}
 } // namespace
 
 SerialConfig::SerialConfig(SettingsStore &settings_store, SettingsAppliedCallback on_settings_applied)
@@ -21,6 +35,13 @@ SerialConfig::SerialConfig(SettingsStore &settings_store, SettingsAppliedCallbac
 void SerialConfig::processSerial() {
     if (!tud_cdc_connected()) {
         return;
+    }
+
+    if (m_ps4_auth_upload_mode) {
+        processPS4AuthUpload();
+        if (m_ps4_auth_upload_mode) {
+            return;
+        }
     }
 
     // Read characters into our buffer
@@ -99,7 +120,95 @@ void SerialConfig::handleCommand(int command_value) {
         m_input_streaming_mode = false;
         break;
 
+    case Command::StartPS4AuthUpload:
+        m_ps4_auth_upload_mode = true;
+        m_ps4_auth_bytes_received = 0;
+        m_ps4_auth_expected_size = 0;
+        std::memset(s_ps4_auth_buf, 0, sizeof(s_ps4_auth_buf));
+        printf("PS4_AUTH_READY\n");
+        stdio_flush();
+        break;
+
+    case Command::QueryPS4Auth:
+        printf("PS4_AUTH_STATUS:%d\n", m_settings_store.hasPS4AuthCredentials() ? 1 : 0);
+        stdio_flush();
+        break;
+
+    case Command::ClearPS4Auth:
+        m_settings_store.clearPS4AuthCredentials();
+        m_settings_store.store();
+        printf("PS4_AUTH_CLEARED\n");
+        stdio_flush();
+        break;
     }
+}
+
+void SerialConfig::processPS4AuthUpload() {
+    // Bundle format: "PAK1" (4) | key_len u16 LE (2) | pad (2) | serial (16) | signature (256) | key_pem (key_len) | crc32 (4)
+    while (tud_cdc_available() && m_ps4_auth_bytes_received < sizeof(s_ps4_auth_buf)) {
+        m_ps4_auth_bytes_received +=
+            tud_cdc_read(&s_ps4_auth_buf[m_ps4_auth_bytes_received],
+                         sizeof(s_ps4_auth_buf) - m_ps4_auth_bytes_received);
+
+        if (m_ps4_auth_expected_size == 0 && m_ps4_auth_bytes_received >= 8) {
+            if (std::memcmp(s_ps4_auth_buf, "PAK1", 4) != 0) {
+                m_ps4_auth_upload_mode = false;
+                printf("PS4_AUTH_ERROR:BAD_MAGIC\n");
+                stdio_flush();
+                return;
+            }
+            const uint16_t key_len =
+                static_cast<uint16_t>(s_ps4_auth_buf[4] | (static_cast<uint16_t>(s_ps4_auth_buf[5]) << 8));
+            if (key_len == 0 || key_len > 3584) {
+                m_ps4_auth_upload_mode = false;
+                printf("PS4_AUTH_ERROR:BAD_KEY_LEN\n");
+                stdio_flush();
+                return;
+            }
+            // 4 magic + 2 key_len + 2 pad + 16 serial + 256 sig + key_len pem + 4 crc
+            m_ps4_auth_expected_size = 4 + 2 + 2 + 16 + 256 + key_len + 4;
+            if (m_ps4_auth_expected_size > sizeof(s_ps4_auth_buf)) {
+                m_ps4_auth_upload_mode = false;
+                printf("PS4_AUTH_ERROR:TOO_LARGE\n");
+                stdio_flush();
+                return;
+            }
+        }
+    }
+
+    if (m_ps4_auth_expected_size == 0 || m_ps4_auth_bytes_received < m_ps4_auth_expected_size) {
+        return; // still receiving
+    }
+
+    // Validate CRC over everything before the last 4 bytes
+    const uint32_t payload_len = m_ps4_auth_expected_size - 4;
+    uint32_t expected_crc = 0;
+    std::memcpy(&expected_crc, &s_ps4_auth_buf[payload_len], 4);
+    const uint32_t actual_crc = crc32(s_ps4_auth_buf, payload_len);
+    if (expected_crc != actual_crc) {
+        m_ps4_auth_upload_mode = false;
+        printf("PS4_AUTH_ERROR:BAD_CRC\n");
+        stdio_flush();
+        return;
+    }
+
+    const uint16_t key_len =
+        static_cast<uint16_t>(s_ps4_auth_buf[4] | (static_cast<uint16_t>(s_ps4_auth_buf[5]) << 8));
+    const uint8_t *serial    = &s_ps4_auth_buf[8];
+    const uint8_t *signature = &s_ps4_auth_buf[8 + 16];
+    const char *key_pem      = reinterpret_cast<const char *>(&s_ps4_auth_buf[8 + 16 + 256]);
+
+    if (!m_settings_store.setPS4AuthCredentials(serial, signature, key_pem, key_len)) {
+        m_ps4_auth_upload_mode = false;
+        printf("PS4_AUTH_ERROR:STORE_FAILED\n");
+        stdio_flush();
+        return;
+    }
+
+    m_ps4_auth_upload_mode = false;
+    m_settings_store.store();
+    printf("PS4_AUTH_SAVED\n");
+    stdio_flush();
 }
 
 void SerialConfig::handleWriteData(const char *data) {

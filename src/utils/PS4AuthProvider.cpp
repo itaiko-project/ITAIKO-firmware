@@ -1,37 +1,30 @@
 #include "utils/PS4AuthProvider.h"
 
-#include "PS4AuthConfiguration.h"
-
 #include "mbedtls/rsa.h"
 #include "mbedtls/sha256.h"
-#include "pico/rand.h"
-
-#include "usb/device_driver.h"
 
 #include <cstring>
 
 namespace {
 int const_rng(void *p_rng, unsigned char *p, size_t len) {
     (void)p_rng;
-
     std::memset(p, 0x39, len);
-
     return 0;
 }
 } // namespace
 
 namespace Doncon::Utils {
 
-PS4AuthProvider::PS4AuthProvider() {
-    if (!Doncon::Config::PS4Auth::config.enabled) {
+PS4AuthProvider::PS4AuthProvider(const std::string &key_pem) {
+    mbedtls_pk_init(&m_pk_context);
+
+    if (key_pem.empty()) {
         return;
     }
 
-    mbedtls_pk_init(&m_pk_context);
-
     if (mbedtls_pk_parse_key(&m_pk_context,
-                             reinterpret_cast<const unsigned char *>(Doncon::Config::PS4Auth::config.key_pem.c_str()),
-                             Doncon::Config::PS4Auth::config.key_pem.size() + 1, nullptr, 0, const_rng, nullptr) != 0) {
+                             reinterpret_cast<const unsigned char *>(key_pem.c_str()), key_pem.size() + 1,
+                             nullptr, 0, const_rng, nullptr) != 0) {
         return;
     }
 

@@ -15,19 +15,12 @@ class PS4AuthProvider {
     static constexpr size_t SIGNATURE_LENGTH = 256;
     static constexpr size_t SERIAL_LENGTH = 16;
 
-    struct Config {
-        bool enabled;
-        std::array<uint8_t, SERIAL_LENGTH> serial;
-        std::array<uint8_t, SIGNATURE_LENGTH> signature;
-        std::string key_pem;
-    };
-
   private:
     bool m_key_valid{false};
     mbedtls_pk_context m_pk_context{};
 
   public:
-    PS4AuthProvider();
+    explicit PS4AuthProvider(const std::string &key_pem = "");
     PS4AuthProvider(const PS4AuthProvider &) = default;
     PS4AuthProvider(PS4AuthProvider &&) = default;
     PS4AuthProvider &operator=(PS4AuthProvider &&) = default;

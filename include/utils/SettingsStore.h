@@ -8,6 +8,7 @@
 #include "hardware/flash.h"
 
 #include <array>
+#include <string>
 
 namespace Doncon::Utils {
 
@@ -18,6 +19,11 @@ class SettingsStore {
     const static uint32_t m_store_size = FLASH_PAGE_SIZE;
     const static uint32_t m_store_pages = m_flash_size / m_store_size;
     const static uint8_t m_magic_byte = 0x39;
+    const static uint32_t m_auth_flash_size = FLASH_SECTOR_SIZE;
+    const static uint32_t m_auth_flash_offset = m_flash_offset - m_auth_flash_size;
+    const static uint32_t m_auth_key_max_size = 3584;
+    const static uint32_t m_auth_magic = 0x53345041; // "AP4S"
+    const static uint16_t m_auth_version = 1;
 
     struct __attribute((packed, aligned(1))) Storecache {
         union {
@@ -46,6 +52,23 @@ class SettingsStore {
     };
     static_assert(sizeof(Storecache) == m_store_size);
 
+    struct __attribute((packed, aligned(1))) AuthStorecache {
+        union {
+            struct __attribute((packed)) {
+                uint32_t magic;
+                uint16_t version;
+                uint16_t key_len;
+                uint8_t serial[16];
+                uint8_t signature[256];
+                char key_pem[m_auth_key_max_size];
+                uint32_t crc32;
+                uint8_t reserved[m_auth_flash_size - (4 + 2 + 2 + 16 + 256 + m_auth_key_max_size + 4)];
+            };
+            uint8_t raw[m_auth_flash_size];
+        };
+    };
+    static_assert(sizeof(AuthStorecache) == m_auth_flash_size);
+
     enum class RebootType : uint8_t {
         None,
         Normal,
@@ -53,10 +76,13 @@ class SettingsStore {
     };
 
     Storecache m_store_cache;
+    AuthStorecache m_auth_store_cache{};
     bool m_dirty{true};
+    bool m_auth_dirty{false};
     RebootType m_scheduled_reboot{RebootType::None};
 
     Storecache read();
+    static bool isAuthValid(const AuthStorecache &cache);
 
   public:
     SettingsStore();
@@ -113,6 +139,13 @@ class SettingsStore {
     [[nodiscard]] Peripherals::Drum::Config::AdcChannels getAdcChannels() const;
 
     void scheduleReboot(bool bootsel = false);
+
+    bool setPS4AuthCredentials(const uint8_t serial[16], const uint8_t signature[256], const char *key_pem,
+                               size_t key_pem_len);
+    bool getPS4AuthCredentials(std::array<uint8_t, 16> &serial, std::array<uint8_t, 256> &signature,
+                               std::string &key_pem) const;
+    [[nodiscard]] bool hasPS4AuthCredentials() const;
+    void clearPS4AuthCredentials();
 
     void store();
     void reset();
