@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "mbedtls/base64.h"
 #include "tusb.h"
 
 namespace Doncon::Utils {
@@ -13,6 +14,8 @@ namespace {
 char s_serial_buf[512];
 uint32_t s_serial_buf_idx = 0;
 uint8_t s_ps4_auth_buf[4096];
+// Base64 of a 3584-byte key = ceil(3584/3)*4 = 4780 bytes; +1 for null
+char s_b64_buf[4800];
 
 uint32_t crc32(const uint8_t *data, size_t length) {
     uint32_t crc = 0xFFFFFFFF;
@@ -141,6 +144,41 @@ void SerialConfig::handleCommand(int command_value) {
         printf("PS4_AUTH_CLEARED\n");
         stdio_flush();
         break;
+
+    case Command::ExportPS4Auth: {
+        std::array<uint8_t, 16> serial{};
+        std::array<uint8_t, 256> signature{};
+        std::string key_pem;
+        if (!m_settings_store.getPS4AuthCredentials(serial, signature, key_pem)) {
+            printf("PS4_AUTH_STATUS:0\n");
+            stdio_flush();
+            break;
+        }
+        printf("PS4_AUTH_STATUS:1\n");
+
+        // Serial as hex (16 bytes → 32 chars)
+        char serial_hex[33] = {};
+        for (size_t i = 0; i < serial.size(); ++i) {
+            snprintf(&serial_hex[i * 2], 3, "%02X", serial[i]);
+        }
+        printf("PS4_AUTH_SERIAL_HEX:%s\n", serial_hex);
+
+        // Signature as hex (256 bytes → 512 chars), reuse s_b64_buf
+        for (size_t i = 0; i < signature.size(); ++i) {
+            snprintf(&s_b64_buf[i * 2], 3, "%02X", signature[i]);
+        }
+        printf("PS4_AUTH_SIGNATURE_HEX:%s\n", s_b64_buf);
+
+        // Key PEM as base64, reuse s_b64_buf
+        size_t b64_len = 0;
+        mbedtls_base64_encode(reinterpret_cast<unsigned char *>(s_b64_buf), sizeof(s_b64_buf) - 1, &b64_len,
+                              reinterpret_cast<const unsigned char *>(key_pem.data()), key_pem.size());
+        s_b64_buf[b64_len] = '\0';
+        printf("PS4_AUTH_KEY_PEM_BASE64:%s\n", s_b64_buf);
+
+        stdio_flush();
+        break;
+    }
     }
 }
 
