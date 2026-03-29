@@ -26,7 +26,8 @@ namespace Doncon::Utils {
  * - Send "2001" to stop streaming sensor data
  * - Send "4000" to start PS4 auth bundle upload (binary mode, see protocol docs)
  * - Send "4001" to query PS4 auth presence (returns PS4_AUTH_STATUS:0 or :1)
- * - Send "4002" to clear stored PS4 auth credentials
+ * - Send "4002" to clear stored PS4 auth credentials (reboots on success)
+ * - Send "4003" to export stored PS4 auth credentials (serial hex, signature hex, key PEM base64)
  * - In write mode, send "key:value" pairs (e.g., "0:800")
  *
  * Configuration Keys (46 total, keys 0-45):
@@ -153,6 +154,7 @@ class SerialConfig {
         StartPS4AuthUpload = 4000,
         QueryPS4Auth = 4001,
         ClearPS4Auth = 4002,
+        ExportPS4Auth = 4003,
     };
 
     void handleCommand(int command_value);
