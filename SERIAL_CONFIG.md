@@ -29,11 +29,11 @@ The system uses a simple command-based protocol:
 - **2001** - Stop streaming sensor data
 - **2002** - Start streaming input status (binary format, each pad is a bit)
 
-**Custom Boot Screen Commands:**
-- **3000** - Start custom boot screen bitmap upload (then send binary BMP data)
-- **3003** - Clear custom bitmap (reset to default splash screen)
-- ~~**3001**~~ - Deprecated: Upload bitmap chunk (auto-handled after 3000)
-- ~~**3002**~~ - Deprecated: Finalize bitmap (auto-handled when complete)
+**PS4 Authentication Commands:**
+- **4000** - Start PS4 auth key upload (device enters binary upload mode, responds with `PS4_AUTH_READY`)
+- **4001** - Query PS4 auth status (responds with `PS4_AUTH_STATUS:0` or `PS4_AUTH_STATUS:1`)
+- **4002** - Clear stored PS4 auth credentials (responds with `PS4_AUTH_CLEARED`, then reboots)
+- **4003** - Export stored PS4 auth credentials (see response format below)
 
 ### Setting Keys
 
@@ -125,6 +125,45 @@ The system uses a simple command-based protocol:
 
 **Note:** All 46 keys (0-45) can be configured via serial protocol using command-line tools or custom scripts.
 
+### PS4 Authentication Upload Protocol
+
+Command **4000** switches the device into binary upload mode, expecting a PAK1 bundle:
+
+| Offset | Size | Description |
+|--------|------|-------------|
+| 0 | 4 | Magic: `PAK1` (ASCII) |
+| 4 | 2 | `key_len` — PEM key length in bytes (u16 LE) |
+| 6 | 2 | Version (u16 LE, currently `1`) |
+| 8 | 16 | Controller serial number (raw bytes) |
+| 24 | 256 | Signature blob (raw bytes) |
+| 280 | key_len | RSA private key (`key.pem` contents, UTF-8) |
+| 280+key_len | 4 | CRC32 over all preceding bytes (u32 LE, IEEE 802.3) |
+
+Upload flow:
+1. Send `4000\n` → wait for `PS4_AUTH_READY`
+2. Send the PAK1 bundle as raw binary (64-byte chunks recommended)
+3. Wait for `PS4_AUTH_SAVED` (success) or `PS4_AUTH_ERROR:<reason>` (failure)
+4. On success the device reboots automatically
+
+Error codes: `BAD_MAGIC`, `BAD_KEY_LEN`, `TOO_LARGE`, `BAD_CRC`, `STORE_FAILED`
+
+The credentials are stored in a dedicated flash sector (second-to-last 4 KB, separate from settings). On boot, if valid credentials are present the PS4 auth provider is initialised automatically.
+
+### PS4 Authentication Export (4003)
+
+Command **4003** returns the stored credentials as text lines:
+
+```
+PS4_AUTH_STATUS:1
+PS4_AUTH_SERIAL_HEX:<32 uppercase hex chars>
+PS4_AUTH_SIGNATURE_HEX:<512 uppercase hex chars>
+PS4_AUTH_KEY_PEM_BASE64:<base64-encoded PEM key>
+```
+
+If no credentials are stored, only `PS4_AUTH_STATUS:0` is returned.
+
+The base64 encoding uses the standard RFC 4648 alphabet (mbedTLS implementation). Decode with `base64 -d` or any standard base64 decoder to recover the original `key.pem` text.
+
 ## Usage Examples
 
 ### Using the Python Test Script
@@ -214,132 +253,6 @@ The output is a single hexadecimal character representing the lower 4 bits of th
 python test_serial_config.py COM3 stream_input
 ```
 
-## Custom Boot Screen Upload
-
-The firmware supports uploading a custom 128x64 monochrome bitmap to replace the default boot screen (splash screen). The bitmap is stored in flash memory and persists across reboots.
-
-### Bitmap Requirements
-
-- **Format**: Windows BMP (bitmap) file
-- **Resolution**: 128 x 64 pixels
-- **Color depth**: 1-bit monochrome (black and white only)
-- **Max size**: 1,280 bytes (including BMP headers)
-- **Compression**: None (uncompressed)
-
-Use the included `scripts/generateBitmap.py` tool to convert any image to the correct format:
-
-```bash
-python scripts/generateBitmap.py input_image.png output.bmp
-```
-
-### Upload Protocol
-
-The bitmap upload uses an automatic protocol - the device reads the BMP header to determine file size and auto-finalizes:
-
-1. **Send command 3000** - Initialize bitmap upload mode
-   - Device responds with: `BITMAP_UPLOAD_READY`
-   - Device enters binary upload mode
-
-2. **Send binary BMP data** - Just send the BMP file
-   - Device automatically reads binary data
-   - Device parses BMP header to determine expected file size
-   - Device automatically saves to flash when all bytes received
-   - Device responds with: `BITMAP_SAVED:<bytes>`
-   - The custom bitmap will be displayed on next boot
-
-3. **Send command 3003** - Clear custom bitmap (optional)
-   - Removes custom bitmap and reverts to default
-   - Device responds with: `BITMAP_CLEARED`
-
-**Note:** Commands 3001 and 3002 from older versions are deprecated but still supported for backward compatibility.
-
-### Example Python Upload Script
-
-```python
-import serial
-import time
-
-def upload_custom_bitmap(port, bitmap_file):
-    ser = serial.Serial(port, 115200, timeout=2)
-    time.sleep(0.5)  # Wait for connection
-
-    # Read bitmap file
-    with open(bitmap_file, 'rb') as f:
-        bitmap_data = f.read()
-
-    print(f"Uploading {len(bitmap_data)} bytes...")
-
-    # Step 1: Start upload
-    ser.write(b"3000\n")
-    response = ser.readline().decode().strip()
-    print(f"Response: {response}")
-
-    if "BITMAP_UPLOAD_READY" not in response:
-        print("Error: Device not ready")
-        return
-
-    # Step 2: Send bitmap data (device auto-finalizes)
-    ser.write(bitmap_data)
-    ser.flush()
-
-    # Wait for device to save (flash write takes ~1-2 seconds)
-    time.sleep(2.0)
-
-    response = ser.readline().decode().strip()
-    print(f"Response: {response}")
-
-    if "BITMAP_SAVED" in response:
-        print("Custom boot screen uploaded successfully!")
-    else:
-        print("Upload failed")
-
-    ser.close()
-
-# Usage
-upload_custom_bitmap("COM3", "my_custom_bootscreen.bmp")
-```
-
-Or simply use the included test script:
-```bash
-python test_serial_config.py COM3 uploadbitmap my_custom_bootscreen.bmp
-```
-
-### Clearing Custom Bitmap
-
-To revert to the default boot screen:
-
-```python
-import serial
-ser = serial.Serial("COM3", 115200)
-ser.write(b"3003\n")
-print(ser.readline().decode())  # Should print: BITMAP_CLEARED
-ser.close()
-```
-
-### Storage Details
-
-- **Flash location**: Pages 4-9 of the last 4KB flash sector (separate from settings)
-- **Persistence**: Survives reboots and most firmware updates
-- **Wear leveling**: Not applied (single write location)
-- **Fallback**: If bitmap is corrupted or missing, default splash screen is shown
-
-### Troubleshooting
-
-**Upload fails:**
-- Ensure bitmap is exactly 128x64 pixels and 1-bit monochrome
-- Verify file size is under 1,280 bytes
-- Use `generateBitmap.py` to ensure correct format
-
-**Custom bitmap not showing:**
-- Reboot the device after upload (or wait for natural reboot)
-- Check that command 3002 returned `BITMAP_SAVED`
-- Try clearing (3003) and re-uploading
-
-**Bitmap appears corrupted:**
-- Verify BMP file is not compressed
-- Ensure binary data transfer is not corrupting bytes
-- Use a different USB cable or port
-
 ## Integration with Existing System
 
 The serial configuration system:
@@ -355,14 +268,14 @@ The serial configuration system:
 
 | Feature | Description |
 |---------|-------------|
-| Protocol | Commands 1000-1004 (config), 2000-2001 (streaming), 3000-3003 (custom boot screen) |
+| Protocol | Commands 1000-1004 (config), 2000-2002 (streaming), 4000-4003 (PS4 auth) |
 | Parameters | 46 configurable keys (0-45) |
 | Value Storage | uint32_t for thresholds, uint16_t for other settings |
 | Integration | Integrated with SettingsStore for persistence |
-| Persistence | Automatic flash wear leveling (settings), dedicated flash pages (bitmap) |
-| Streaming Mode | Commands 2000/2001 for live sensor data (~100Hz) |
-| Custom Boot Screen | Commands 3000-3003 for 128x64 monochrome BMP upload (max 1280 bytes) |
-| Features | Thresholds, debounce, double trigger, cutoffs, keyboard mappings, ADC channels, custom splash |
+| Persistence | Automatic flash wear leveling (settings), dedicated flash sector (PS4 auth) |
+| Streaming Mode | Commands 2000/2001 for live sensor data (~100Hz), 2002 for digital input status |
+| PS4 Authentication | Commands 4000-4003 for runtime credential upload/query/clear/export |
+| Features | Thresholds, debounce, double trigger, cutoffs, keyboard mappings, ADC channels, PS4 auth |
 
 ## USB Mode Compatibility
 
