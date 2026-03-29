@@ -86,6 +86,7 @@ void usbd_driver_send_report(usb_report_t report) {
 
     if (tud_suspended()) {
         tud_remote_wakeup();
+        return;
     }
 
     if (usbd_driver->send_report) {
