@@ -143,7 +143,7 @@ void Display::drawIdleScreen() {
 
     // Menu hint
     ssd1306_draw_line(&m_display, 0, 54, 128, 54);
-    ssd1306_draw_string(&m_display, 0, 56, 1, "Hold STA+SEL for Menu");
+    ssd1306_draw_string(&m_display, 0, 56, 1, "Hold + and - for Menu");
 #endif
 }
 
