@@ -84,7 +84,9 @@ void core1_task() {
     Peripherals::Display display(Config::Default::display_config, g_settings_store);
 
     Utils::PS4AuthProvider ps4authprovider(g_ps4_auth_key_pem);
-    std::array<uint8_t, Utils::PS4AuthProvider::SIGNATURE_LENGTH> auth_challenge{};
+    std::array<uint8_t, Utils::PS4AuthProvider::SIGNATURE_LENGTH> pending_auth_challenge{};
+    bool has_pending_auth_challenge = false;
+    bool signing_active = false;
 
     Utils::InputState input_state;
     Utils::Menu::State menu_display_msg{};
@@ -143,19 +145,27 @@ void core1_task() {
         if (queue_try_remove(&menu_display_queue, &menu_display_msg)) {
             display.setMenuState(menu_display_msg);
         }
-        if (queue_try_remove(&auth_challenge_queue, auth_challenge.data())) {
-            const auto signed_challenge = ps4authprovider.sign(auth_challenge);
-            if (signed_challenge) {
-                queue_try_remove(&auth_signed_challenge_queue, nullptr); // clear stale response
-                queue_try_add(&auth_signed_challenge_queue, signed_challenge->data());
-            }
+        if (!has_pending_auth_challenge && queue_try_remove(&auth_challenge_queue, pending_auth_challenge.data())) {
+            has_pending_auth_challenge = true;
+            signing_active = true;
         }
 
+        display.setSigningActive(signing_active);
         led.setInputState(input_state);
         display.setInputState(input_state);
 
         led.update();
         display.update();
+
+        if (has_pending_auth_challenge) {
+            const auto signed_challenge = ps4authprovider.sign(pending_auth_challenge);
+            if (signed_challenge) {
+                queue_try_remove(&auth_signed_challenge_queue, nullptr); // clear stale response
+                queue_try_add(&auth_signed_challenge_queue, signed_challenge->data());
+            }
+            has_pending_auth_challenge = false;
+            signing_active = false;
+        }
     }
 }
 

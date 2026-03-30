@@ -111,6 +111,7 @@ bool Display::hasActivity(const Utils::InputState &state) {
 
 void Display::setUsbMode(usb_mode_t mode) { m_usb_mode = mode; };
 void Display::setPlayerId(uint8_t player_id) { m_player_id = player_id; };
+void Display::setSigningActive(bool signing_active) { m_signing_active = signing_active; };
 
 void Display::setMenuState(const Utils::Menu::State &menu_state) { m_menu_state = menu_state; }
 
@@ -124,11 +125,16 @@ void Display::drawIdleScreen() {
     ssd1306_draw_string(&m_display, 0, 0, 1, mode_string.c_str());
     ssd1306_draw_line(&m_display, 0, 10, 128, 10);
 
-    // Roll counter
-    auto roll_str = std::to_string(m_input_state.drum.current_roll) + " Roll";
-    auto prev_roll_str = "Last " + std::to_string(m_input_state.drum.previous_roll);
-    ssd1306_draw_string(&m_display, (127 - (roll_str.length() * 12)) / 2, 20, 2, roll_str.c_str());
-    ssd1306_draw_string(&m_display, (127 - (prev_roll_str.length() * 6)) / 2, 40, 1, prev_roll_str.c_str());
+    // Center text area: roll counter (default) or PS4 signing status
+    if (m_signing_active) {
+        const std::string signing = "Signing...";
+        ssd1306_draw_string(&m_display, (127 - (signing.length() * 12)) / 2, 24, 2, signing.c_str());
+    } else {
+        auto roll_str = std::to_string(m_input_state.drum.current_roll) + " Roll";
+        auto prev_roll_str = "Last " + std::to_string(m_input_state.drum.previous_roll);
+        ssd1306_draw_string(&m_display, (127 - (roll_str.length() * 12)) / 2, 20, 2, roll_str.c_str());
+        ssd1306_draw_string(&m_display, (127 - (prev_roll_str.length() * 6)) / 2, 40, 1, prev_roll_str.c_str());
+    }
 
     // Player "LEDs"
     if (m_player_id != 0) {
