@@ -19,8 +19,11 @@
 #include "pico/util/queue.h"
 
 #include <array>
+#include <atomic>
 #include <cstdio>
+#include <memory>
 #include <string>
+#include <variant>
 
 using namespace Doncon;
 
@@ -29,7 +32,7 @@ namespace {
 queue_t control_queue;
 queue_t menu_display_queue;
 queue_t drum_input_queue;
-queue_t controller_input_queue;
+queue_t controller_state_queue;
 
 queue_t auth_challenge_queue;
 queue_t auth_signed_challenge_queue;
@@ -38,6 +41,9 @@ std::shared_ptr<Utils::SettingsStore> g_settings_store;
 std::string g_ps4_auth_key_pem;
 std::array<uint8_t, Utils::PS4AuthProvider::SERIAL_LENGTH> g_ps4_auth_serial{};
 std::array<uint8_t, Utils::PS4AuthProvider::SIGNATURE_LENGTH> g_ps4_auth_signature{};
+std::atomic_bool g_led_is_active{false};
+const bool kControllerOnCore0 =
+    std::holds_alternative<Peripherals::Controller::Config::InternalGpio>(Config::Default::controller_config.gpio_config);
 
 enum class ControlCommand : uint8_t {
     SetUsbMode,
@@ -69,7 +75,11 @@ void core1_task() {
     gpio_pull_up(Config::Default::i2c_config.scl_pin);
     i2c_init(Config::Default::i2c_config.block, Config::Default::i2c_config.speed_hz);
 
-    Peripherals::Controller controller(Config::Default::controller_config);
+    std::unique_ptr<Peripherals::Controller> controller;
+    if (!kControllerOnCore0) {
+        controller = std::make_unique<Peripherals::Controller>(Config::Default::controller_config);
+    }
+
     Peripherals::StatusLed led(Config::Default::led_config);
     Peripherals::Display display(Config::Default::display_config, g_settings_store);
 
@@ -83,15 +93,23 @@ void core1_task() {
     display.drawSplashScreen();
 
     while (true) {
-        controller.updateInputState(input_state);
+        const bool led_active = led.isActive();
+        g_led_is_active.store(led_active, std::memory_order_relaxed);
 
-        // Mask buttons on pins shared with LED data line while LEDs are driving
-        if (led.isActive()) {
-            input_state.controller.buttons.home = false;
-            input_state.controller.buttons.share = false;
+        if (controller) {
+            controller->updateInputState(input_state);
+
+            // Mask buttons on pins shared with LED data line while LEDs are driving
+            if (led_active) {
+                input_state.controller.buttons.home = false;
+                input_state.controller.buttons.share = false;
+            }
+
+            queue_try_add(&controller_state_queue, &input_state.controller);
+        } else {
+            queue_try_remove(&controller_state_queue, &input_state.controller);
         }
 
-        queue_try_add(&controller_input_queue, &input_state.controller);
         queue_try_remove(&drum_input_queue, &input_state.drum);
 
         if (queue_try_remove(&control_queue, &control_msg)) {
@@ -147,7 +165,7 @@ int main() {
     queue_init(&control_queue, sizeof(ControlMessage), 1);
     queue_init(&menu_display_queue, sizeof(Utils::Menu::State), 1);
     queue_init(&drum_input_queue, sizeof(Utils::InputState::Drum), 1);
-    queue_init(&controller_input_queue, sizeof(Utils::InputState::Controller), 1);
+    queue_init(&controller_state_queue, sizeof(Utils::InputState::Controller), 1);
     queue_init(&auth_challenge_queue, sizeof(std::array<uint8_t, Utils::PS4AuthProvider::SIGNATURE_LENGTH>), 1);
     queue_init(&auth_signed_challenge_queue, sizeof(std::array<uint8_t, Utils::PS4AuthProvider::SIGNATURE_LENGTH>), 1);
 
@@ -161,6 +179,10 @@ int main() {
     auto drum_config = Config::Default::drum_config;
     drum_config.adc_channels = settings_store->getAdcChannels();
     Peripherals::Drum drum(drum_config);
+    std::unique_ptr<Peripherals::Controller> controller;
+    if (kControllerOnCore0) {
+        controller = std::make_unique<Peripherals::Controller>(Config::Default::controller_config);
+    }
 
     Utils::InputState input_state;
     // True while a start+select combo is in progress; suppresses those buttons
@@ -250,7 +272,19 @@ int main() {
 
     while (true) {
         drum.updateInputState(input_state);
-        queue_try_remove(&controller_input_queue, &input_state.controller);
+        if (controller) {
+            controller->updateInputState(input_state);
+
+            // Keep behavior consistent with core1-side masking for shared LED pins.
+            if (g_led_is_active.load(std::memory_order_relaxed)) {
+                input_state.controller.buttons.home = false;
+                input_state.controller.buttons.share = false;
+            }
+
+            queue_try_add(&controller_state_queue, &input_state.controller);
+        } else {
+            queue_try_remove(&controller_state_queue, &input_state.controller);
+        }
 
         const auto drum_message = input_state.drum;
 

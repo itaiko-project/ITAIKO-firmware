@@ -9,6 +9,7 @@
 namespace Doncon::Peripherals {
 
 StatusLed::StatusLed(const Config &config) : m_config(config) {
+    #ifdef LED_LIGHTS
     // Initialize PIO state machine for WS2812 (this claims the pin for PIO)
     ws2812_init(pio0, config.led_pin, m_config.is_rgbw);
 
@@ -20,6 +21,7 @@ StatusLed::StatusLed(const Config &config) : m_config(config) {
     m_leds.resize(m_config.led_count, 0);
     m_led_states.resize(m_config.led_count, {0.0f, 0.0f, 0.0f});
     m_last_update_time = to_ms_since_boot(get_absolute_time());
+    #endif
 }
 
 void StatusLed::setBrightness(const uint8_t brightness) { m_config.brightness = brightness; }
@@ -31,6 +33,8 @@ void StatusLed::setPlayerColor(const Config::Color &color) { m_player_color = co
 bool StatusLed::isActive() const { return m_active; }
 
 void StatusLed::update() {
+    #ifdef LED_LIGHTS
+
     uint32_t now = to_ms_since_boot(get_absolute_time());
     float dt = (now - m_last_update_time) / 1000.0f;
     m_last_update_time = now;
@@ -198,6 +202,8 @@ void StatusLed::update() {
             m_active = false;
         }
     }
+    
+     #endif
 }
 
 } // namespace Doncon::Peripherals

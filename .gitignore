@@ -2,7 +2,7 @@
 .cache/
 build/
 research/
-
+__pycache__/
 *.pio.h
 hidtaiko src/
 debug/debug.rar

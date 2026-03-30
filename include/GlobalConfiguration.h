@@ -185,7 +185,7 @@ const Peripherals::StatusLed::Config led_config = {
     .max_current_ma = 350,
 
     .brightness = 255,
-    .enable_player_color = true,
+    .enable_player_color = false,
 };
 
 const Peripherals::Display::Config display_config = {
