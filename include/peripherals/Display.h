@@ -41,6 +41,7 @@ class Display {
     Utils::InputState m_input_state;
     usb_mode_t m_usb_mode{USB_MODE_DEBUG};
     uint8_t m_player_id{0};
+    bool m_signing_active{false};
 
     Utils::Menu::State m_menu_state{};
 
@@ -67,6 +68,7 @@ class Display {
     void setInputState(const Utils::InputState &state);
     void setUsbMode(usb_mode_t mode);
     void setPlayerId(uint8_t player_id);
+    void setSigningActive(bool signing_active);
 
     void setMenuState(const Utils::Menu::State &menu_state);
 
