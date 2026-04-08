@@ -1,117 +1,109 @@
-# DonCon2040 - A RP2040 based Taiko no Tatsujin arcade controller
+# ITAIKO Firmware
 
-DonCon2040 is a firmware (and by extension a PCB) for DIY Taiko no Tatsujin arcade style drum controllers.
+Firmware for DIY Taiko no Tatsujin arcade-style drum controllers based on the RP2040 microcontroller.
 
-It is pretty much tailored to this specific use case, if you are looking for something universal, ready-to-flash and on-the-fly configurable I'd recommend to have a look at more generic approaches like [GP2040-CE](https://github.com/OpenStickCommunity/GP2040-CE). If you however want build something more specialized or custom, feel free to use this project as a base, it is designed to be somewhat modular and should be easy remodel. See [DivaCon2040](https://github.com/ravinrabbid/DivaCon2040) for an example on how this could look like.
-If you have any questions about the project in general or need hints how to build this thing, feel free to open a [discussion](https://github.com/ravinrabbid/DonCon2040/discussions) anytime!
+This project started as a fork of [DonCon2040](https://github.com/ravinrabbid/DonCon2040) by ravinrabbid. The input processing algorithm is inspired by [HIDtaiko](https://github.com/kasasiki3/HIDtaiko) by kasasiki3. Both projects deserve credit for the foundation this firmware builds on.
 
-![DonCon2040](assets/drum.jpg)
+## Controller Emulation Modes
 
-## Features
+The firmware can emulate 12 different USB devices, selectable at runtime through the on-screen menu:
 
-- Various controller emulation modes
-  - HORI PS4-095 Taiko Drum for PS4 (will work on PS4, see [PS4 Authentication](#ps4-authentication) for details)
-  - HORI NSW-079 Taiko Drum for Switch (compatible with Taiko no Tatsujin Rhythm Festival / Drum'n'Fun on Switch)
-  - Dualshock 4 (Only for PC/Steam, will not work on an actual PS4!)
-  - Dualshock 3
-  - Switch Pro Controller
-  - XInput
-  - XInput Analog (Compatible with [TaikoArcadeLoader](https://github.com/esuo1198/TaikoArcadeLoader) analog input)
-  - Keyboard (Mapping: 'DFJK' / 'CBN,')
-  - MIDI
-  - Debug mode (will output current state via USB serial and allow direct flashing)
-- Additional buttons via external i2c GPIO expander
-- Basic configuration via on-screen menu on attached OLED screen
-- Single WS2812 LED for trigger feedback
-- Drumroll counter on display
+| Mode | Description |
+|------|-------------|
+| Switch Tatacon | HORI NSW-079 Taiko Drum (default) |
+| Switch Horipad | Pro Controller, D-pad mode |
+| PS3 Dualshock 3 | Standard PS3 controller |
+| PS4 Tatacon | HORI PS4-095 Taiko Drum (requires authentication keys, see below) |
+| PS4 Dualshock 4 | PC/Steam only, will **not** work on an actual PS4 |
+| Keyboard P1 | DFJK mapping (configurable via serial) |
+| Keyboard P2 | CBN, mapping (configurable via serial) |
+| XInput | Xbox 360 controller |
+| XInput Analog P1 | Analog triggers, compatible with [TaikoArcadeLoader](https://github.com/esuo1198/TaikoArcadeLoader) |
+| XInput Analog P2 | Same as above, player 2 |
+| MIDI | Note on/off output |
+| Debug | Raw state dump over USB serial |
 
-## Building
+## Configurable Settings
 
-I highly recommend to build the firmware yourself so you can make adjustments in `include/GlobalConfiguration.h` to match your specific controller build.
-You can still use the [binary release](https://github.com/ravinrabbid/DonCon2040/releases) which is pre-configured for the [DonConIO](/pcb/DonConIO).
+All settings below can be adjusted at runtime through the on-screen menu (hold Start+Select for 2 seconds) and are saved to flash memory.
 
-### VSCode (Windows, Linux, MacOS)
+### Trigger Thresholds
 
-Install [VSCode](https://code.visualstudio.com/) and get the [Raspberry Pi Pico](https://marketplace.visualstudio.com/items?itemName=raspberry-pi.raspberry-pi-pico) extension. From the extension choose 'Import Project' and select the folder where you've checked out this repository, then use 'Compile Project'.
+Per-pad sensitivity thresholds for Don Left, Don Right, Ka Left, and Ka Right. Controls how hard you need to hit each pad for it to register.
 
-### CLI
+### Cutoff Thresholds
 
-See [pico-sdk readme](https://github.com/raspberrypi/pico-sdk/blob/master/README.md#quick-start-your-own-project) for a list of pre-requisites.
+Per-pad upper cutoff values. Hits above this value are clamped.
 
-Use the environment variables `PICO_SDK_PATH` to use a local pico-sdk, and `PICO_BOARD` to select another target board.
-By default the pico-sdk will be fetched from Github and the target board will be "pico".
+### Debounce Timings
 
-```sh
-mkdir build && cd build
-cmake ..
-make
-```
+Multiple independent debounce timers to prevent false inputs:
 
-## Configuration
-
-Few things which you probably want to change more regularly can be changed using an on-screen menu on the attached OLED display, hold both Start and Select for 2 seconds to enter the menu:
-
-- Controller emulation mode
-- LED brightness
-- Trigger thresholds
-- Hold Time
-- Double Trigger Mode and Thresholds
-- Enter BOOTSEL mode for firmware flashing
-
-Those settings are persisted to flash memory if you choose 'Save' when exiting the Menu and will survive power cycles.
-
-Defaults and everything else are compiled statically into the firmware. You can find everything in `include/GlobalConfiguration.h`. This covers default controller emulation mode, i2c pins, external ADC configuration, addresses and speed, default trigger thresholds, scale and debounce delay, button mapping, LED colors and brightness.
-
-### Debounce Delay / Hold Time
-
-The debounce delay also implicitly serves as the hold time of the input after a hit. On some platforms inputs won't be registered properly if this time is too short. For example Taiko no Tatsujin on Switch needs at least 25 milliseconds.
-
-If you notice dropped inputs even if the controller signals a hit on the LED/Display, try to increase this value.
+- **Global debounce delay** -- minimum time between any two inputs
+- **Don debounce** -- lockout between left and right Don hits
+- **Ka debounce** -- lockout between left and right Ka hits
+- **Crosstalk debounce** -- lockout between Don and Ka (prevents bleed between pad types)
+- **Key timeout** -- how long an input is held active after a hit. Some platforms need a minimum value here (Switch needs at least 25ms)
 
 ### Double Trigger (Large Notes)
 
-Home versions of Taiko no Tatsujin give higher scores for large notes when both sides are hit simultaneously. In contrast, arcade versions will only need a normal hit (or sometimes a harder hit). To emulate this behavior, the following modes are offered:
+Home versions of Taiko no Tatsujin give higher scores for large notes when both sides are hit simultaneously. Arcade versions only need a single harder hit. Two modes are available:
 
-- **Off**: Hit both sides to score large notes.
-- **Threshold**: Automatically trigger both sides if a hit is stronger than the configured double hit threshold.
+- **Off** -- both sides must be hit manually for large notes
+- **Threshold** -- automatically triggers both sides if a single hit exceeds the configured threshold (per-pad)
 
-### PS4 Authentication
+## Serial Configuration
 
-The PS4 needs a controller to sign a cryptographic challenge every few seconds, otherwise it will stop working after around 8 minutes after plugging in. For the Taiko no Tatsujin games this is somewhat bearable, since you can re-plug the controller before starting each song to avoid running into the timeout during gameplay. Still, this is annoying.
+A USB CDC serial interface is available for remote configuration without using the on-screen menu. The official web configurator is available at [itaiko.com/configure](https://itaiko.com/configure).
 
-DonCon2040 can sign those challenges, but you will need to obtain some data from an original DS4 and compile it into the firmware. You will need a serial, signature and private key file. I can't and won't help you how to obtain those, you'll need to figure this out yourself.
+## Building
 
-To build the firmware run `scripts/generateAuthConfig.py` in the folder where you placed the required files. Copy the resulting `PS4AuthConfiguration.h` to the `include` directory, replacing the existing header. Then build the firmware as described in [Building](#building).
+### Prerequisites
 
-Signing the challenge will block the second core of the rp2040 for 2-3 seconds, so the display, external controller and LED will appear stuck from time to time. Input handling of the drum is unaffected.
+- CMake 3.13+
+- Pico SDK 2.2.0
+- ARM GCC toolchain
+
+### VSCode
+
+Install the [Raspberry Pi Pico extension](https://marketplace.visualstudio.com/items?itemName=raspberry-pi.raspberry-pi-pico), import the project, set the CMake variant to **Release**, and use 'Compile Project'.
+
+### CLI
+
+```sh
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make
+```
+
+**Important:** The CMake variant must be set to `Release`. The default `Debug` build will cause the firmware to not start.
+
+Set `PICO_SDK_PATH` to use a local SDK (otherwise fetched from GitHub). Set `PICO_BOARD` to target a different board (default: `waveshare_rp2040_zero`).
 
 ## Hardware
 
-### IO Board
+The firmware expects:
 
-The [DonConIOmini](/pcb/DonConIOmini) board in the pcb subfolder is designed to be close to the original arcade hardware. It hosts a Waveshare RP2040-Zero and provides signal conditioning for Sensatec GSS-4S* piezo impact sensors. See its [README](/pcb/DonConIOmini/README.md) for details.
+- **RP2040 board** (default config targets Waveshare RP2040-Zero)
+- **SSD1306 OLED display** (128x64, I2C) for the menu and status display
+- **Piezo sensors** (e.g. Sensatec GSS-4S*) providing analog signals to the ADC
 
-If you don't want to use this board, the firmware should be usable on most RP2040 boards with appropriate configuration. You may also use a more simple trigger solution, it only has to provide an analog trigger level to the ADC inputs to be compatible.
+Both internal RP2040 ADC and external MCP3204 SPI ADC are supported. Hardware pin assignments, I2C addresses, and default values are configured in `include/GlobalConfiguration.h`.
 
-### Controller Buttons and Display
+## PS4 Authentication
 
-Additional controller buttons and the display are attached to the same (or different if your board has more than one) i2c bus. For the display, use a standard SSD1306 OLED display with 128x64 resolution. The buttons need to be attached to a MCP23017 IO expander.
+The PS4 requires controllers to periodically sign a cryptographic challenge. Without valid authentication keys, the controller stops responding after roughly 8 minutes.
 
-See [DonConPad](/pcb/DonConPad/) for a exemplary gamepad pcb.
+ITAIKO can perform this signing, but it requires a serial number, signature, and private key extracted from a genuine DualShock 4 controller. These credentials are not included in this repository and will not be distributed. You need to source them yourself.
 
-Mind that currently the display and buttons are mandatory to use the controller.
+Authentication keys can be uploaded to the controller through the [web configurator](https://itaiko.com/configure), which stores them in flash.
 
-### Physical construction
-
-I'll only give a rough outline of the physical construction since I'm still not completely happy with its performance and I'm still experimenting with some alternatives:
-
-- The pads are made of 12mm thick multiplex boards. The outer diameter is ~42cm, the inner diameter is ~35cm.
-- Pads are mounted to another 20mm multiplex board with rubber dampeners. The backplates on the arcade drum seem to be thinner, but since those are sturdily mounted to the arcade machine, I figured some more mass couldn't hurt.
-- The rubber dampeners are 15mm of height and 20mm in diameter. The arcade drum seems to use tapered dampeners, but at least the tapered dampeners I could get my hands on felt too soft, so I went with straight ones.
-- For the drum skin I tried with a 2mm natural rubber sheet covered by some canvas, which worked reasonably well but is pretty loud and has little rebound. I imported real arcade drum skins now, which work a lot better.
+During the signing process (~2-3 seconds), the display will freeze, this will happen repeatedly while in ps4 tatakon mode. Drum and controller input is not affected.
 
 ## Acknowledgements
 
-- [daschr](https://github.com/daschr) for the [SSD1306 OLED driver](https://github.com/daschr/pico-ssd1306)
-- [FeralAI](https://github.com/FeralAI) for the inspiration and Dualshock3/XInput driver from the [GP2040 Project](https://github.com/FeralAI/GP2040)
-- The linux kernel contributors for documenting the game controllers in their drivers
+- [ravinrabbid](https://github.com/ravinrabbid) -- [DonCon2040](https://github.com/ravinrabbid/DonCon2040), the original project this firmware is forked from
+- [kasasiki3](https://github.com/kasasiki3) -- [HIDtaiko](https://github.com/kasasiki3/HIDtaiko), whose input processing algorithm inspired the one used here
+- [daschr](https://github.com/daschr) -- [SSD1306 OLED driver](https://github.com/daschr/pico-ssd1306)
+- [FeralAI](https://github.com/FeralAI) -- DS3/XInput driver from the [GP2040 Project](https://github.com/FeralAI/GP2040)
+- The Linux kernel contributors for documenting game controller protocols in their drivers
