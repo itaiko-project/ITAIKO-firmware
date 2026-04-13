@@ -34,10 +34,10 @@ const Utils::DrumKeys drum_keys_p1 = {
 };
 
 const Utils::DrumKeys drum_keys_p2 = {
-    .ka_left = HID_KEY_C,
-    .don_left = HID_KEY_B,
-    .don_right = HID_KEY_N,
-    .ka_right = HID_KEY_COMMA,
+    .ka_left = HID_KEY_Z,
+    .don_left = HID_KEY_X,
+    .don_right = HID_KEY_C,
+    .ka_right = HID_KEY_V,
 };
 
 const Utils::ControllerKeys controller_keys = {
