@@ -515,6 +515,24 @@ static uint16_t usio_open(uint8_t rhport, tusb_desc_interface_t const *desc_itf,
         (uint16_t)(sizeof(tusb_desc_interface_t) + desc_itf->bNumEndpoints * sizeof(tusb_desc_endpoint_t));
     TU_ASSERT(max_len >= drv_len, 0);
 
+    // Clear command/response state. usio_reset() (the TinyUSB bus-reset hook)
+    // already does this, but rpcs3 closing without a physical unplug leaves the
+    // bus electrically attached: no reset fires, yet the host re-enumerates on
+    // the next launch via SET_CONFIGURATION → usio_open. Without this wipe the
+    // first command after reattach gets misparsed as the tail of a write
+    // payload that was in-flight when rpcs3 disappeared, and the game's
+    // boot-time USIO check times out.
+    //
+    // SRAM contents (usio_sram, file scope) and envelope state are kept
+    // intentionally — those represent persistent device state, not the
+    // transient command pipeline.
+    usio_itf.expecting_data = false;
+    usio_itf.usio_length_remaining = 0;
+    usio_itf.write_total = 0;
+    usio_itf.response_size = 0;
+    usio_itf.response_seek = 0;
+    usio_itf.response_pending = false;
+
     usio_itf.itf_num = desc_itf->bInterfaceNumber;
 
     uint8_t const *p_desc = tu_desc_next(desc_itf);
