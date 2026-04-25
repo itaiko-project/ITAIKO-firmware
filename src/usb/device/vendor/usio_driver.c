@@ -187,23 +187,19 @@ static void build_taiko_frame(uint8_t out[0x60]) {
     out[16] = (uint8_t)(usio_itf.coin_counter & 0xFF);
     out[17] = (uint8_t)(usio_itf.coin_counter >> 8);
 
-    const uint16_t HIT = 0x1800;
-    if (usio_itf.cached_input.hit_side_left) {
-        out[32] = (uint8_t)(HIT & 0xFF);
-        out[33] = (uint8_t)(HIT >> 8);
-    }
-    if (usio_itf.cached_input.hit_center_left) {
-        out[34] = (uint8_t)(HIT & 0xFF);
-        out[35] = (uint8_t)(HIT >> 8);
-    }
-    if (usio_itf.cached_input.hit_center_right) {
-        out[36] = (uint8_t)(HIT & 0xFF);
-        out[37] = (uint8_t)(HIT >> 8);
-    }
-    if (usio_itf.cached_input.hit_side_right) {
-        out[38] = (uint8_t)(HIT & 0xFF);
-        out[39] = (uint8_t)(HIT >> 8);
-    }
+    // Drum pad amplitudes are 16-bit little-endian force values. We stream the
+    // raw piezo ADC reading straight through so the game sees the natural
+    // rise / decay envelope of the sensor, which is what its hit detection is
+    // tuned against on real Namco 357 hardware.
+    const uint16_t side_left    = usio_itf.cached_input.hit_side_left;
+    const uint16_t center_left  = usio_itf.cached_input.hit_center_left;
+    const uint16_t center_right = usio_itf.cached_input.hit_center_right;
+    const uint16_t side_right   = usio_itf.cached_input.hit_side_right;
+
+    out[32] = (uint8_t)(side_left    & 0xFF); out[33] = (uint8_t)(side_left    >> 8);
+    out[34] = (uint8_t)(center_left  & 0xFF); out[35] = (uint8_t)(center_left  >> 8);
+    out[36] = (uint8_t)(center_right & 0xFF); out[37] = (uint8_t)(center_right >> 8);
+    out[38] = (uint8_t)(side_right   & 0xFF); out[39] = (uint8_t)(side_right   >> 8);
 }
 
 // ----------------------------------------------------------------------------

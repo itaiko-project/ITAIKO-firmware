@@ -11,10 +11,13 @@ extern "C" {
 #endif
 
 typedef struct {
-    bool hit_side_left;
-    bool hit_center_left;
-    bool hit_center_right;
-    bool hit_side_right;
+    // Raw piezo amplitudes streamed straight from the ADC. The game runs its own
+    // peak / debounce / velocity logic on these, the same way it would against a
+    // real Namco 357 IO board, so the firmware does no thresholding here.
+    uint16_t hit_side_left;
+    uint16_t hit_center_left;
+    uint16_t hit_center_right;
+    uint16_t hit_side_right;
 
     bool btn_enter;   // Start
     bool btn_service; // Select
