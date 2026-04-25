@@ -27,6 +27,7 @@ typedef enum {
     USB_MODE_XBOX360_ANALOG_P2,
     USB_MODE_MIDI,
     USB_MODE_DEBUG,
+    USB_MODE_USIO_TAIKO,
 } usb_mode_t;
 
 enum {

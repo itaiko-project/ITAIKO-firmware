@@ -45,7 +45,8 @@ const std::map<Menu::Page, const Menu::Descriptor> Menu::descriptors = {
        {"Analog P1", Menu::Descriptor::Action::SetUsbMode},  //
        {"Analog P2", Menu::Descriptor::Action::SetUsbMode},  //
        {"MIDI", Menu::Descriptor::Action::SetUsbMode},       //
-       {"Debug", Menu::Descriptor::Action::SetUsbMode}},     //
+       {"Debug", Menu::Descriptor::Action::SetUsbMode},      //
+       {"USIO Taiko", Menu::Descriptor::Action::SetUsbMode}},//
       0}},                                                   //
 
     {Menu::Page::Drum,                                                           //

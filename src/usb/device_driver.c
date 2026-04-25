@@ -6,6 +6,7 @@
 #include "usb/device/hid/switch_driver.h"
 #include "usb/device/midi_driver.h"
 #include "usb/device/vendor/debug_driver.h"
+#include "usb/device/vendor/usio_driver.h"
 #include "usb/device/vendor/xinput_driver.h"
 
 #include "bsp/board.h"
@@ -65,6 +66,9 @@ void usbd_driver_init(usb_mode_t mode) {
         break;
     case USB_MODE_DEBUG:
         usbd_driver = get_debug_device_driver();
+        break;
+    case USB_MODE_USIO_TAIKO:
+        usbd_driver = get_usio_device_driver();
         break;
     }
 
