@@ -474,7 +474,6 @@ static bool send_usio_report(usb_report_t report) {
         usio_itf.cached_input.hit_center_right_triggered,
         usio_itf.cached_input.hit_side_right_triggered,
     };
-    const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
     for (int i = 0; i < 4; i++) {
         if (triggered[i] && !usio_itf.envelope_prev_triggered[i]) {
             usio_itf.envelope_active[i] = true;
