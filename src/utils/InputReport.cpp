@@ -298,10 +298,14 @@ usb_report_t InputReport::getUsioReport(const InputState &state) {
     const auto &ctrl = state.controller;
 
     m_usio_input = usio_input_t{
-        .hit_side_left = drum.ka_left.triggered,
-        .hit_center_left = drum.don_left.triggered,
-        .hit_center_right = drum.don_right.triggered,
-        .hit_side_right = drum.ka_right.triggered,
+        // Stream raw piezo amplitudes; the game runs its own peak / debounce /
+        // velocity logic on these, the same way it would against a real Namco 357
+        // IO board. Firmware-side debounce settings (key_timeout, crosstalk, etc.)
+        // are bypassed in this mode by design.
+        .hit_side_left = drum.ka_left.raw,
+        .hit_center_left = drum.don_left.raw,
+        .hit_center_right = drum.don_right.raw,
+        .hit_side_right = drum.ka_right.raw,
         .btn_enter = ctrl.buttons.start,
         .btn_service = ctrl.buttons.select,
         .btn_up = ctrl.dpad.up,
