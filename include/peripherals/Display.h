@@ -39,7 +39,7 @@ class Display {
     State m_state{State::Splash};
 
     Utils::InputState m_input_state;
-    usb_mode_t m_usb_mode{USB_MODE_DEBUG};
+    usb_mode_t m_usb_mode{USB_MODE_SWITCH_TATACON};
     uint8_t m_player_id{0};
     bool m_signing_active{false};
 

@@ -5,7 +5,6 @@
 #include "usb/device/hid/ps4_driver.h"
 #include "usb/device/hid/switch_driver.h"
 #include "usb/device/midi_driver.h"
-#include "usb/device/vendor/debug_driver.h"
 #include "usb/device/vendor/usio_driver.h"
 #include "usb/device/vendor/xinput_driver.h"
 
@@ -19,7 +18,7 @@ enum {
     DESC_STR_MAX = 127,
 };
 
-static usb_mode_t usbd_mode = USB_MODE_DEBUG;
+static usb_mode_t usbd_mode = USB_MODE_SWITCH_TATACON;
 static const usbd_driver_t *usbd_driver = NULL;
 static usbd_player_led_cb_t usbd_player_led_cb = NULL;
 
@@ -63,9 +62,6 @@ void usbd_driver_init(usb_mode_t mode) {
         break;
     case USB_MODE_MIDI:
         usbd_driver = get_midi_device_driver();
-        break;
-    case USB_MODE_DEBUG:
-        usbd_driver = get_debug_device_driver();
         break;
     case USB_MODE_USIO_TAIKO:
         usbd_driver = get_usio_device_driver();

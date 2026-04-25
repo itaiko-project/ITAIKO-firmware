@@ -40,8 +40,6 @@ std::string modeToString(usb_mode_t mode) {
         return "Analog P2";
     case USB_MODE_MIDI:
         return "MIDI";
-    case USB_MODE_DEBUG:
-        return "Debug";
     case USB_MODE_USIO_TAIKO:
         return "USIO Taiko";
     }
