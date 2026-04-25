@@ -11,13 +11,23 @@ extern "C" {
 #endif
 
 typedef struct {
-    // Raw piezo amplitudes streamed straight from the ADC. The game runs its own
-    // peak / debounce / velocity logic on these, the same way it would against a
-    // real Namco 357 IO board, so the firmware does no thresholding here.
-    uint16_t hit_side_left;
-    uint16_t hit_center_left;
-    uint16_t hit_center_right;
-    uint16_t hit_side_right;
+    // Trigger flags come from the firmware's own debounce / crosstalk pipeline
+    // (the same path used by Switch / PS4 / etc), so all the existing user
+    // settings still apply. The driver shapes a synthesized decay envelope on
+    // each rising edge so the game sees a real piezo-like pulse rather than a
+    // flat held value.
+    bool hit_side_left_triggered;
+    bool hit_center_left_triggered;
+    bool hit_center_right_triggered;
+    bool hit_side_right_triggered;
+
+    // Peak amplitude captured at the moment the trigger fired. Used as the
+    // envelope's starting value; the driver applies a floor so soft hits still
+    // clear the game's velocity thresholds.
+    uint16_t hit_side_left_peak;
+    uint16_t hit_center_left_peak;
+    uint16_t hit_center_right_peak;
+    uint16_t hit_side_right_peak;
 
     bool btn_enter;   // Start
     bool btn_service; // Select

@@ -298,14 +298,19 @@ usb_report_t InputReport::getUsioReport(const InputState &state) {
     const auto &ctrl = state.controller;
 
     m_usio_input = usio_input_t{
-        // Stream raw piezo amplitudes; the game runs its own peak / debounce /
-        // velocity logic on these, the same way it would against a real Namco 357
-        // IO board. Firmware-side debounce settings (key_timeout, crosstalk, etc.)
-        // are bypassed in this mode by design.
-        .hit_side_left = drum.ka_left.raw,
-        .hit_center_left = drum.don_left.raw,
-        .hit_center_right = drum.don_right.raw,
-        .hit_side_right = drum.ka_right.raw,
+        // Re-use the firmware's debounce / crosstalk pipeline for hit detection;
+        // the USIO driver uses each rising edge to start a synthesized C3-style
+        // exponential decay envelope with a fixed peak, so the game sees a real
+        // piezo-like pulse rather than a held value. `analog` still carries the
+        // captured peak but it is ignored by the driver for the envelope scaling.
+        .hit_side_left_triggered = drum.ka_left.triggered,
+        .hit_center_left_triggered = drum.don_left.triggered,
+        .hit_center_right_triggered = drum.don_right.triggered,
+        .hit_side_right_triggered = drum.ka_right.triggered,
+        .hit_side_left_peak = drum.ka_left.analog,
+        .hit_center_left_peak = drum.don_left.analog,
+        .hit_center_right_peak = drum.don_right.analog,
+        .hit_side_right_peak = drum.ka_right.analog,
         .btn_enter = ctrl.buttons.start,
         .btn_service = ctrl.buttons.select,
         .btn_up = ctrl.dpad.up,
