@@ -8,6 +8,7 @@
 #include "usb/device/hid/ps4_driver.h"
 #include "usb/device/hid/switch_driver.h"
 #include "usb/device/midi_driver.h"
+#include "usb/device/vendor/usio_driver.h"
 #include "usb/device/vendor/xinput_driver.h"
 #include "usb/device_driver.h"
 
@@ -113,6 +114,7 @@ struct InputReport {
         .velocity = {},
     };
     std::string m_debug_report;
+    usio_input_t m_usio_input{};
 
     uint8_t m_ps4_report_counter = 0;
 
@@ -125,6 +127,7 @@ struct InputReport {
     usb_report_t getXinputAnalogReport(const InputState &state, Player player);
     usb_report_t getMidiReport(const InputState &state);
     usb_report_t getDebugReport(const InputState &state);
+    usb_report_t getUsioReport(const InputState &state);
 
   public:
     InputReport(std::shared_ptr<SettingsStore> settings_store);

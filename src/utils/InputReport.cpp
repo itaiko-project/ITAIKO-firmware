@@ -293,6 +293,26 @@ usb_report_t InputReport::getDebugReport(const InputState &state) {
     return {reinterpret_cast<uint8_t *>(m_debug_report.data()), static_cast<uint16_t>(m_debug_report.size() + 1)};
 }
 
+usb_report_t InputReport::getUsioReport(const InputState &state) {
+    const auto &drum = state.drum;
+    const auto &ctrl = state.controller;
+
+    m_usio_input = usio_input_t{
+        .hit_side_left = drum.ka_left.triggered,
+        .hit_center_left = drum.don_left.triggered,
+        .hit_center_right = drum.don_right.triggered,
+        .hit_side_right = drum.ka_right.triggered,
+        .btn_enter = ctrl.buttons.start,
+        .btn_service = ctrl.buttons.select,
+        .btn_up = ctrl.dpad.up,
+        .btn_down = ctrl.dpad.down,
+        .btn_coin_raw = ctrl.buttons.share,
+        .btn_test_raw = ctrl.buttons.home,
+    };
+
+    return {reinterpret_cast<uint8_t *>(&m_usio_input), sizeof(usio_input_t)};
+}
+
 usb_report_t InputReport::getReport(const InputState &state, usb_mode_t mode) {
     switch (mode) {
     case USB_MODE_SWITCH_TATACON:
@@ -317,6 +337,8 @@ usb_report_t InputReport::getReport(const InputState &state, usb_mode_t mode) {
         return getMidiReport(state);
     case USB_MODE_DEBUG:
         return getDebugReport(state);
+    case USB_MODE_USIO_TAIKO:
+        return getUsioReport(state);
     }
 
     return getDebugReport(state);
