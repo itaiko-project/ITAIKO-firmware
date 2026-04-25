@@ -1,9 +1,6 @@
 #include "utils/InputReport.h"
 #include "utils/SettingsStore.h"
 
-#include <iomanip>
-#include <sstream>
-
 namespace Doncon::Utils {
 
 namespace {
@@ -277,22 +274,6 @@ usb_report_t InputReport::getMidiReport(const InputState &state) {
     return {reinterpret_cast<uint8_t *>(&m_midi_report), sizeof(midi_report_t)};
 }
 
-usb_report_t InputReport::getDebugReport(const InputState &state) {
-    const auto &drum = state.drum;
-
-    std::stringstream out;
-
-    // CSV format: triggered_ka_left,ka_raw,triggered_don_left,don_left_raw,triggered_don_right,don_right_raw,triggered_ka_right,ka_right_raw
-    out << (drum.ka_left.triggered ? "T" : "F") << "," << drum.ka_left.raw << ","      //
-        << (drum.don_left.triggered ? "T" : "F") << "," << drum.don_left.raw << ","    //
-        << (drum.don_right.triggered ? "T" : "F") << "," << drum.don_right.raw << ","  //
-        << (drum.ka_right.triggered ? "T" : "F") << "," << drum.ka_right.raw << "\n";
-
-    m_debug_report = out.str();
-
-    return {reinterpret_cast<uint8_t *>(m_debug_report.data()), static_cast<uint16_t>(m_debug_report.size() + 1)};
-}
-
 usb_report_t InputReport::getUsioReport(const InputState &state) {
     const auto &drum = state.drum;
     const auto &ctrl = state.controller;
@@ -344,13 +325,11 @@ usb_report_t InputReport::getReport(const InputState &state, usb_mode_t mode) {
         return getXinputAnalogReport(state, Player::Two);
     case USB_MODE_MIDI:
         return getMidiReport(state);
-    case USB_MODE_DEBUG:
-        return getDebugReport(state);
     case USB_MODE_USIO_TAIKO:
         return getUsioReport(state);
     }
 
-    return getDebugReport(state);
+    return getUsioReport(state);
 }
 
 } // namespace Doncon::Utils
