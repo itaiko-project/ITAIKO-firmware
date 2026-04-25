@@ -1,6 +1,9 @@
 #include "usb/device/vendor/usio_driver.h"
 
 #include "device/usbd_pvt.h"
+#include "hardware/flash.h"
+#include "hardware/sync.h"
+#include "pico/multicore.h"
 #include "pico/time.h"
 #include "tusb.h"
 
@@ -108,8 +111,138 @@ enum {
     USIO_CMD_INIT = 0xA0,
 };
 
-enum { USIO_RESPONSE_BUF_SIZE = 512 };
-enum { USIO_WRITE_BUF_SIZE = 512 };
+// Sized to fit the largest observed game read: 0x1000 bytes from page 0 at addr
+// 0x1000 (the 4 KB bookkeeping block). Writes never exceed 0xB8 in the trace
+// but match the read buffer for symmetry.
+enum { USIO_RESPONSE_BUF_SIZE = 4352 };
+enum { USIO_WRITE_BUF_SIZE = 4352 };
+
+// SRAM emulation. rpcs3 exposes 16 pages of 64 KB each, but only pages 0/1 are
+// touched by Taiko S111 and the highest accessed offset is 0x1FFF, so 8 KB per
+// page is plenty. Kept at file scope so it survives USB resets (which clear
+// usio_itf via tu_memclr in usio_reset).
+enum {
+    USIO_SRAM_PAGE_SIZE = 0x2000,
+    USIO_SRAM_PAGE_COUNT = 2,
+};
+static uint8_t usio_sram[USIO_SRAM_PAGE_COUNT][USIO_SRAM_PAGE_SIZE];
+
+// ----------------------------------------------------------------------------
+// Flash-backed persistence for the SRAM contents.
+//
+// Layout (from end of flash, going backward):
+//   [last sector]                        SettingsStore main config (4 KB)
+//   [prev sector]                        SettingsStore PS4 auth    (4 KB)
+//   [USIO_FLASH_SECTORS sectors before]  USIO SRAM region          (20 KB)
+//
+// We sit *before* SettingsStore's reserved area so we can never collide with
+// existing user settings. The region is one header sector + four data sectors:
+// the header sector holds magic/version/CRC; the four data sectors mirror
+// usio_sram[] verbatim.
+//
+// Writes are coalesced: we mark a dirty timestamp on each SRAM write and let
+// the commit happen ~USIO_FLASH_DEBOUNCE_MS later from the USB transfer
+// callback (which fires at every read poll). This collapses each test-menu
+// save burst (2–4 writes within a few ms) into a single flash erase+program.
+// ----------------------------------------------------------------------------
+
+enum {
+    USIO_FLASH_SECTORS = 5,
+    USIO_FLASH_HEADER_SIZE = FLASH_SECTOR_SIZE,
+    USIO_FLASH_DATA_SIZE = (USIO_FLASH_SECTORS - 1) * FLASH_SECTOR_SIZE,
+    USIO_FLASH_TOTAL_SIZE = USIO_FLASH_SECTORS * FLASH_SECTOR_SIZE,
+    USIO_FLASH_DEBOUNCE_MS = 750,
+};
+
+// Sit before SettingsStore's two reserved sectors (main + auth = 8 KB).
+#define USIO_FLASH_RESERVED_BY_SETTINGS_STORE (2u * FLASH_SECTOR_SIZE)
+#define USIO_FLASH_OFFSET                                                                                              \
+    (PICO_FLASH_SIZE_BYTES - USIO_FLASH_RESERVED_BY_SETTINGS_STORE - USIO_FLASH_TOTAL_SIZE)
+
+#define USIO_FLASH_MAGIC 0x4F495355u // 'USIO'
+#define USIO_FLASH_VERSION 1u
+
+_Static_assert(sizeof(usio_sram) == USIO_FLASH_DATA_SIZE, "usio_sram must fit in the flash data region");
+
+typedef struct {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t reserved;
+    uint32_t payload_size;
+    uint32_t crc32;
+} usio_flash_header_t;
+
+_Static_assert(sizeof(usio_flash_header_t) <= FLASH_PAGE_SIZE, "header must fit in one flash page");
+
+static bool usio_store_dirty = false;
+static uint32_t usio_store_dirty_since_ms = 0;
+
+static uint32_t usio_crc32(const uint8_t *data, size_t length) {
+    uint32_t crc = 0xFFFFFFFFu;
+    for (size_t i = 0; i < length; i++) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++) {
+            const uint32_t mask = (crc & 1u) ? 0xEDB88320u : 0u;
+            crc = (crc >> 1) ^ mask;
+        }
+    }
+    return ~crc;
+}
+
+static void usio_store_load(void) {
+    const usio_flash_header_t *hdr = (const usio_flash_header_t *)(XIP_BASE + USIO_FLASH_OFFSET);
+    if (hdr->magic != USIO_FLASH_MAGIC || hdr->version != USIO_FLASH_VERSION ||
+        hdr->payload_size != USIO_FLASH_DATA_SIZE) {
+        memset(usio_sram, 0, sizeof(usio_sram));
+        return;
+    }
+    const uint8_t *payload = (const uint8_t *)(XIP_BASE + USIO_FLASH_OFFSET + USIO_FLASH_HEADER_SIZE);
+    if (usio_crc32(payload, USIO_FLASH_DATA_SIZE) != hdr->crc32) {
+        memset(usio_sram, 0, sizeof(usio_sram));
+        return;
+    }
+    memcpy(usio_sram, payload, sizeof(usio_sram));
+}
+
+static void usio_store_commit(void) {
+    // One header page (256 B) padded with 0xFF, followed by the SRAM payload.
+    static uint8_t header_page[FLASH_PAGE_SIZE];
+    memset(header_page, 0xFF, sizeof(header_page));
+    usio_flash_header_t hdr = {
+        .magic = USIO_FLASH_MAGIC,
+        .version = USIO_FLASH_VERSION,
+        .reserved = 0,
+        .payload_size = USIO_FLASH_DATA_SIZE,
+        .crc32 = usio_crc32((const uint8_t *)usio_sram, sizeof(usio_sram)),
+    };
+    memcpy(header_page, &hdr, sizeof(hdr));
+
+    multicore_lockout_start_blocking();
+    const uint32_t interrupts = save_and_disable_interrupts();
+
+    flash_range_erase(USIO_FLASH_OFFSET, USIO_FLASH_TOTAL_SIZE);
+    flash_range_program(USIO_FLASH_OFFSET, header_page, sizeof(header_page));
+    flash_range_program(USIO_FLASH_OFFSET + USIO_FLASH_HEADER_SIZE, (const uint8_t *)usio_sram, sizeof(usio_sram));
+
+    restore_interrupts_from_disabled(interrupts);
+    multicore_lockout_end_blocking();
+
+    usio_store_dirty = false;
+}
+
+static void usio_store_mark_dirty(void) {
+    usio_store_dirty = true;
+    usio_store_dirty_since_ms = to_ms_since_boot(get_absolute_time());
+}
+
+static void usio_store_tick(void) {
+    if (!usio_store_dirty)
+        return;
+    const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
+    if ((uint32_t)(now_ms - usio_store_dirty_since_ms) < USIO_FLASH_DEBOUNCE_MS)
+        return;
+    usio_store_commit();
+}
 
 typedef struct {
     uint8_t itf_num;
@@ -293,20 +426,47 @@ static void handle_read(uint8_t channel, uint16_t reg, uint16_t length) {
             return;
         }
     }
+
+    // Channels >= 2 map to SRAM pages. Mirrors usb_device_usio::usio_read in
+    // rpcs3/Emu/Io/usio.cpp.
+    if (channel >= 2) {
+        const uint8_t page = (uint8_t)(channel - 2);
+        const uint32_t end = (uint32_t)reg + length;
+        if (length > 0 && page < USIO_SRAM_PAGE_COUNT && end <= USIO_SRAM_PAGE_SIZE) {
+            stage_response(&usio_sram[page][reg], length, length);
+            return;
+        }
+    }
+
+    // Channel 1 (firmware-update endpoint) and out-of-range SRAM accesses both
+    // fall through to an empty response.
     stage_response(NULL, 0, length);
 }
 
 static void handle_write(uint8_t channel, uint16_t reg, const uint8_t *data, uint16_t size) {
-    (void)channel;
-    (void)reg;
-    (void)data;
-    (void)size;
+    if (channel >= 2 && size > 0 && data != NULL) {
+        const uint8_t page = (uint8_t)(channel - 2);
+        const uint32_t end = (uint32_t)reg + size;
+        if (page < USIO_SRAM_PAGE_COUNT && end <= USIO_SRAM_PAGE_SIZE) {
+            if (memcmp(&usio_sram[page][reg], data, size) != 0) {
+                memcpy(&usio_sram[page][reg], data, size);
+                usio_store_mark_dirty();
+            }
+        }
+    }
+    // Channel 0 register writes (lamps, hopper, card reader) and channel 1
+    // (firmware update) are intentionally dropped — rpcs3 only traces them.
 }
 
 static void handle_init(uint8_t channel, uint16_t reg, uint16_t size) {
-    (void)channel;
-    (void)reg;
     (void)size;
+    if (channel == 0 && reg == 0x000A) {
+        // ClearSram: wipe all backing pages. Matches usio_init in rpcs3.
+        memset(usio_sram, 0, sizeof(usio_sram));
+        usio_store_mark_dirty();
+    }
+    // reg 0x0008 (USIO Reset) and other init sub-commands are no-ops; the USB
+    // stack handles bus-level reset separately.
 }
 
 static void pump_response_in(uint8_t rhport) {
@@ -340,7 +500,10 @@ static void usio_reset(uint8_t rhport) {
     tu_memclr(&usio_itf, sizeof(usio_itf));
 }
 
-static void usio_init_cb(void) { usio_reset(0); }
+static void usio_init_cb(void) {
+    usio_reset(0);
+    usio_store_load();
+}
 
 static uint16_t usio_open(uint8_t rhport, tusb_desc_interface_t const *desc_itf, uint16_t max_len) {
     TU_VERIFY(desc_itf->bInterfaceClass == 0x00 && desc_itf->bInterfaceSubClass == 0x00 &&
@@ -385,6 +548,11 @@ static bool usio_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_req
 
 static bool usio_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes) {
     TU_ASSERT(result == XFER_RESULT_SUCCESS);
+
+    // Opportunistic deferred flush. The xfer callback fires on every USIO poll
+    // cycle (~30 Hz from rpcs3 trace), so dirty SRAM gets committed within one
+    // debounce window after the last write.
+    usio_store_tick();
 
     if (ep_addr == usio_itf.ep_out) {
         const uint8_t *buf = usio_itf.epout_buf;
