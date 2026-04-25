@@ -149,6 +149,7 @@ typedef struct {
     // Order: side_left, center_left, center_right, side_right.
     bool envelope_active[4];
     bool envelope_prev_triggered[4];
+    bool envelope_needs_start[4];
     uint32_t envelope_start_ms[4];
     uint16_t envelope_peak[4];
 
@@ -162,19 +163,16 @@ typedef struct {
 // next physical strike so consecutive hits register as separate events. 15 ms
 // gives ~5 game polls of visible ramp at the typical poll cadence.
 enum {
-    USIO_ENVELOPE_MS = 32,
+    USIO_ENVELOPE_MS = 15,
     USIO_ENVELOPE_FIXED_PEAK = 0xFFFF, // fixed peak for all hits
 };
 
 // C3 processed piezo envelope decay curve (scaled to 1024 = 1.0).
-// This curve holds the peak for 20ms to ensure 60Hz (16.6ms) polling always
-// captures the maximum value, then decays exponentially.
+// Optimized 15ms curve for testing Latch-on-Read logic.
 static const uint16_t USIO_ENVELOPE_CURVE[USIO_ENVELOPE_MS + 1] = {
-    1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 
-    1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024, 
-    1024, 980, 850, 680, 480, 310, 170, 80, 30, 10, 2, 1, 0
+    1024, 1024, 1024, 1024, 1023, 1021, 1015, 1000, 969, 907, 788, 584, 342, 137, 28, 0
 };
- 
+
 CFG_TUSB_MEM_SECTION static usio_interface_t usio_itf;
 
 // ----------------------------------------------------------------------------
@@ -226,6 +224,14 @@ static void build_taiko_frame(uint8_t out[0x60]) {
         if (!usio_itf.envelope_active[i]) {
             continue;
         }
+
+        // Latch-on-Read: If this is the first time the game is seeing this hit,
+        // start the timer now. This guarantees the game sees Curve[0] (Peak).
+        if (usio_itf.envelope_needs_start[i]) {
+            usio_itf.envelope_start_ms[i] = now_ms;
+            usio_itf.envelope_needs_start[i] = false;
+        }
+
         const uint32_t elapsed = now_ms - usio_itf.envelope_start_ms[i];
         if (elapsed >= USIO_ENVELOPE_MS) {
             usio_itf.envelope_active[i] = false;
@@ -236,6 +242,7 @@ static void build_taiko_frame(uint8_t out[0x60]) {
         out[hit_offsets[i] + 1] = (uint8_t)(v >> 8);
     }
 }
+
 
 // ----------------------------------------------------------------------------
 // Read / write / init command handlers
@@ -471,7 +478,7 @@ static bool send_usio_report(usb_report_t report) {
     for (int i = 0; i < 4; i++) {
         if (triggered[i] && !usio_itf.envelope_prev_triggered[i]) {
             usio_itf.envelope_active[i] = true;
-            usio_itf.envelope_start_ms[i] = now_ms;
+            usio_itf.envelope_needs_start[i] = true;
             usio_itf.envelope_peak[i] = USIO_ENVELOPE_FIXED_PEAK;
         }
         usio_itf.envelope_prev_triggered[i] = triggered[i];
