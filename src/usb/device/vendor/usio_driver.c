@@ -252,6 +252,7 @@ typedef struct {
 
     CFG_TUSB_MEM_ALIGN uint8_t epout_buf[TUD_USIO_EP_BULK_SIZE];
     CFG_TUSB_MEM_ALIGN uint8_t epin_buf[TUD_USIO_EP_BULK_SIZE];
+    CFG_TUSB_MEM_ALIGN uint8_t epstatus_buf[TUD_USIO_EP_STATUS_SIZE];
 
     // Command state machine
     bool expecting_data;
@@ -289,6 +290,12 @@ typedef struct {
     // Track whether a response transfer is in progress on EP 0x82.
     // Set false when all chunks have been sent AND the transfer chain is closed.
     bool response_pending;
+
+    // Some USIO hosts issue an initial IN drain before sending the first command.
+    // Arm a single idle ZLP after configuration so that pre-command drain can
+    // complete, but do not keep idle ZLPs queued during normal command traffic.
+    bool pre_command_idle_zlp_armed;
+    bool command_out_seen;
 } usio_interface_t;
 
 // Envelope shape parameters. The pulse must outlive a single game poll cycle
@@ -474,6 +481,12 @@ static void pump_response_in(uint8_t rhport) {
         return;
 
     if (usio_itf.response_seek >= usio_itf.response_size) {
+        if (usio_itf.response_pending && usio_itf.response_size == 0) {
+            usbd_edpt_xfer(rhport, usio_itf.ep_in, NULL, 0);
+            usio_itf.response_pending = false;
+            return;
+        }
+
         if (usio_itf.response_pending && usio_itf.response_size > 0 &&
             (usio_itf.response_size % TUD_USIO_EP_BULK_SIZE) == 0) {
             usbd_edpt_xfer(rhport, usio_itf.ep_in, NULL, 0);
@@ -489,6 +502,33 @@ static void pump_response_in(uint8_t rhport) {
     memcpy(usio_itf.epin_buf, &usio_itf.response[usio_itf.response_seek], chunk);
     usbd_edpt_xfer(rhport, usio_itf.ep_in, usio_itf.epin_buf, chunk);
     usio_itf.response_seek += chunk;
+}
+
+static void arm_pre_command_idle_zlp(uint8_t rhport) {
+    if (usio_itf.command_out_seen || usio_itf.pre_command_idle_zlp_armed || usbd_edpt_busy(rhport, usio_itf.ep_in))
+        return;
+
+    usio_itf.pre_command_idle_zlp_armed = usbd_edpt_xfer(rhport, usio_itf.ep_in, NULL, 0);
+}
+
+// Real PS3 (and unpatched RPCS3) submits a zero-length IN URB to drain the read
+// endpoint after a CMD_WRITE finishes. libusb cannot complete that URB until
+// the device sends a ZLP, so the host hangs forever if we stay silent. Queue a
+// one-shot ZLP on EP_IN whenever a write completes and nothing else is pending.
+static void arm_post_write_idle_zlp(uint8_t rhport) {
+    if (usio_itf.response_pending || usio_itf.pre_command_idle_zlp_armed ||
+        usbd_edpt_busy(rhport, usio_itf.ep_in))
+        return;
+
+    usio_itf.pre_command_idle_zlp_armed = usbd_edpt_xfer(rhport, usio_itf.ep_in, NULL, 0);
+}
+
+static void arm_status_in(uint8_t rhport) {
+    if (!usio_itf.ep_status_in || usbd_edpt_busy(rhport, usio_itf.ep_status_in))
+        return;
+
+    memset(usio_itf.epstatus_buf, 0, sizeof(usio_itf.epstatus_buf));
+    (void)usbd_edpt_xfer(rhport, usio_itf.ep_status_in, usio_itf.epstatus_buf, sizeof(usio_itf.epstatus_buf));
 }
 
 // ----------------------------------------------------------------------------
@@ -532,6 +572,8 @@ static uint16_t usio_open(uint8_t rhport, tusb_desc_interface_t const *desc_itf,
     usio_itf.response_size = 0;
     usio_itf.response_seek = 0;
     usio_itf.response_pending = false;
+    usio_itf.pre_command_idle_zlp_armed = false;
+    usio_itf.command_out_seen = false;
 
     usio_itf.itf_num = desc_itf->bInterfaceNumber;
 
@@ -553,6 +595,8 @@ static uint16_t usio_open(uint8_t rhport, tusb_desc_interface_t const *desc_itf,
 
     // Start listening on the OUT endpoint.
     TU_ASSERT(usbd_edpt_xfer(rhport, usio_itf.ep_out, usio_itf.epout_buf, sizeof(usio_itf.epout_buf)), 0);
+    arm_status_in(rhport);
+    arm_pre_command_idle_zlp(rhport);
     return drv_len;
 }
 
@@ -575,6 +619,7 @@ static bool usio_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, 
     if (ep_addr == usio_itf.ep_out) {
         const uint8_t *buf = usio_itf.epout_buf;
         uint32_t size = xferred_bytes;
+        usio_itf.command_out_seen = true;
 
         if (usio_itf.expecting_data) {
             // Accumulate write payload.
@@ -589,6 +634,7 @@ static bool usio_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, 
             if (usio_itf.usio_length_remaining == 0) {
                 usio_itf.expecting_data = false;
                 handle_write(usio_itf.usio_channel, usio_itf.usio_register, usio_itf.write_buf, usio_itf.write_total);
+                arm_post_write_idle_zlp(rhport);
             }
         } else if (size == 6) {
             // Command frame.
@@ -605,6 +651,7 @@ static bool usio_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, 
                     usio_itf.write_total = 0;
                     if (!usio_itf.expecting_data) {
                         handle_write(usio_itf.usio_channel, usio_itf.usio_register, NULL, 0);
+                        arm_post_write_idle_zlp(rhport);
                     }
                 }
                 // Bad checksum: silently drop (matches rpcs3 behaviour).
@@ -620,9 +667,14 @@ static bool usio_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, 
         TU_ASSERT(usbd_edpt_xfer(rhport, usio_itf.ep_out, usio_itf.epout_buf, sizeof(usio_itf.epout_buf)));
     } else if (ep_addr == usio_itf.ep_in) {
         // Previous IN chunk delivered.
+        if (usio_itf.pre_command_idle_zlp_armed) {
+            usio_itf.pre_command_idle_zlp_armed = false;
+        }
         if (usio_itf.response_pending) {
             pump_response_in(rhport);
         }
+    } else if (ep_addr == usio_itf.ep_status_in) {
+        arm_status_in(rhport);
     }
 
     return true;
