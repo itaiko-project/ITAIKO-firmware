@@ -44,7 +44,6 @@ typedef struct __attribute((packed, aligned(1))) {
 
 extern const uint8_t ps4_desc_hid_report[];
 
-const usbd_driver_t *get_hid_ds4_device_driver();
 const usbd_driver_t *get_hid_ps4_tatacon_device_driver();
 
 uint16_t hid_ps4_get_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t report_type, uint8_t *buffer,

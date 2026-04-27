@@ -21,23 +21,6 @@ const tusb_desc_device_t switch_tatacon_desc_device = {
     .bNumConfigurations = 1,
 };
 
-const tusb_desc_device_t switch_horipad_desc_device = {
-    .bLength = sizeof(tusb_desc_device_t),
-    .bDescriptorType = TUSB_DESC_DEVICE,
-    .bcdUSB = 0x0200,
-    .bDeviceClass = TUSB_CLASS_UNSPECIFIED,
-    .bDeviceSubClass = 0x00,
-    .bDeviceProtocol = 0x00,
-    .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
-    .idVendor = 0x0F0D,  // HORI
-    .idProduct = 0x00C1, // HORIPAD
-    .bcdDevice = 0x0100,
-    .iManufacturer = USBD_STR_MANUFACTURER,
-    .iProduct = USBD_STR_PRODUCT,
-    .iSerialNumber = USBD_STR_SERIAL,
-    .bNumConfigurations = 1,
-};
-
 enum {
     USBD_ITF_HID,
     USBD_ITF_MAX,
@@ -126,19 +109,6 @@ void hid_switch_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t 
     (void)report_type;
     (void)bufsize;
     (void)buffer;
-}
-
-const usbd_driver_t *get_hid_switch_horipad_device_driver() {
-    static const usbd_driver_t hid_switch_horipad_device_driver = {
-        .name = "Switch",
-        .app_driver = &hid_app_driver,
-        .desc_device = &switch_horipad_desc_device,
-        .desc_cfg = switch_desc_cfg,
-        .desc_bos = NULL,
-        .send_report = send_hid_switch_report,
-    };
-
-    return &hid_switch_horipad_device_driver;
 }
 
 const usbd_driver_t *get_hid_switch_tatacon_device_driver() {

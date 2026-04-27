@@ -63,35 +63,6 @@ usb_report_t InputReport::getSwitchReport(const InputState &state) {
     return {reinterpret_cast<uint8_t *>(&m_switch_report), sizeof(hid_switch_report_t)};
 }
 
-usb_report_t InputReport::getPS3Report(const InputState &state) {
-    const auto &controller = state.controller;
-    const auto &drum = state.drum;
-
-    m_ps3_report.buttons1 = 0                                             //
-                            | (controller.buttons.select ? (1 << 0) : 0)  // Select
-                            | (drum.don_left.triggered ? (1 << 1) : 0)    // L3
-                            | (drum.don_right.triggered ? (1 << 2) : 0)   // R3
-                            | (controller.buttons.start ? (1 << 3) : 0)   // Start
-                            | (controller.dpad.up ? (1 << 4) : 0)         // Up
-                            | (controller.dpad.right ? (1 << 5) : 0)      // Right
-                            | (controller.dpad.down ? (1 << 6) : 0)       // Down
-                            | (controller.dpad.left ? (1 << 7) : 0);      // Left
-    m_ps3_report.buttons2 = 0 | (drum.ka_left.triggered ? (1 << 0) : 0)   // L2
-                            | (drum.ka_right.triggered ? (1 << 1) : 0)    // R2
-                            | (controller.buttons.l ? (1 << 2) : 0)       // L1
-                            | (controller.buttons.r ? (1 << 3) : 0)       // R1
-                            | (controller.buttons.north ? (1 << 4) : 0)   // Triangle
-                            | (controller.buttons.east ? (1 << 5) : 0)    // Circle
-                            | (controller.buttons.south ? (1 << 6) : 0)   // Cross
-                            | (controller.buttons.west ? (1 << 7) : 0);   // Square
-    m_ps3_report.buttons3 = 0 | (controller.buttons.home ? (1 << 0) : 0); // Home
-
-    m_ps3_report.lt = (drum.ka_left.triggered ? 0xff : 0);
-    m_ps3_report.rt = (drum.ka_right.triggered ? 0xff : 0);
-
-    return {reinterpret_cast<uint8_t *>(&m_ps3_report), sizeof(hid_ps3_report_t)};
-}
-
 usb_report_t InputReport::getPS4Report(const InputState &state) {
     const auto &controller = state.controller;
     const auto &drum = state.drum;
@@ -217,42 +188,6 @@ usb_report_t InputReport::getXinputDigitalReport(const InputState &state) {
     return {reinterpret_cast<uint8_t *>(&m_xinput_report), sizeof(xinput_report_t)};
 }
 
-usb_report_t InputReport::getXinputAnalogReport(const InputState &state, InputReport::Player player) {
-    const auto &drum = state.drum;
-
-    getXinputBaseReport(state);
-
-    int16_t x = 0;
-    int16_t y = 0;
-
-    auto map_to_axis = [](uint16_t raw) { return (int16_t)(raw >> 1); };
-
-    if (drum.ka_left.analog > drum.don_left.analog) {
-        x = (int16_t)-map_to_axis(drum.ka_left.analog);
-    } else {
-        x = map_to_axis(drum.don_left.analog);
-    }
-
-    if (drum.ka_right.analog > drum.don_right.analog) {
-        y = map_to_axis(drum.ka_right.analog);
-    } else {
-        y = (int16_t)-map_to_axis(drum.don_right.analog);
-    }
-
-    switch (player) {
-    case Player::One:
-        m_xinput_report.lx = x;
-        m_xinput_report.ly = y;
-        break;
-    case Player::Two:
-        m_xinput_report.rx = x;
-        m_xinput_report.ry = y;
-        break;
-    }
-
-    return {reinterpret_cast<uint8_t *>(&m_xinput_report), sizeof(xinput_report_t)};
-}
-
 usb_report_t InputReport::getMidiReport(const InputState &state) {
     const auto &drum = state.drum;
 
@@ -306,12 +241,8 @@ usb_report_t InputReport::getUsioReport(const InputState &state) {
 usb_report_t InputReport::getReport(const InputState &state, usb_mode_t mode) {
     switch (mode) {
     case USB_MODE_SWITCH_TATACON:
-    case USB_MODE_SWITCH_HORIPAD:
         return getSwitchReport(state);
-    case USB_MODE_DUALSHOCK3:
-        return getPS3Report(state);
     case USB_MODE_PS4_TATACON:
-    case USB_MODE_DUALSHOCK4:
         return getPS4Report(state);
     case USB_MODE_KEYBOARD_P1:
         return getKeyboardReport(state, Player::One);
@@ -319,10 +250,6 @@ usb_report_t InputReport::getReport(const InputState &state, usb_mode_t mode) {
         return getKeyboardReport(state, Player::Two);
     case USB_MODE_XBOX360:
         return getXinputDigitalReport(state);
-    case USB_MODE_XBOX360_ANALOG_P1:
-        return getXinputAnalogReport(state, Player::One);
-    case USB_MODE_XBOX360_ANALOG_P2:
-        return getXinputAnalogReport(state, Player::Two);
     case USB_MODE_MIDI:
         return getMidiReport(state);
     case USB_MODE_USIO_TAIKO:

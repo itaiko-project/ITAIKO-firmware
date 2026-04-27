@@ -31,22 +31,17 @@ const std::map<Menu::Page, const Menu::Descriptor> Menu::descriptors = {
        {"Present", Menu::Descriptor::Action::None}},           //
       0}},                                                     //
 
-    {Menu::Page::DeviceMode,                                 //
-     {Menu::Descriptor::Type::Selection,                     //
-      "Mode",                                                //
-      {{"Swtch Tata", Menu::Descriptor::Action::SetUsbMode}, //
-       {"Swtch Pro", Menu::Descriptor::Action::SetUsbMode},  //
-       {"Dualshock3", Menu::Descriptor::Action::SetUsbMode}, //
-       {"PS4 Tata", Menu::Descriptor::Action::SetUsbMode},   //
-       {"Dualshock4", Menu::Descriptor::Action::SetUsbMode}, //
-       {"Keybrd P1", Menu::Descriptor::Action::SetUsbMode},  //
-       {"Keybrd P2", Menu::Descriptor::Action::SetUsbMode},  //
-       {"Xbox 360", Menu::Descriptor::Action::SetUsbMode},   //
-       {"Analog P1", Menu::Descriptor::Action::SetUsbMode},  //
-       {"Analog P2", Menu::Descriptor::Action::SetUsbMode},  //
-       {"MIDI", Menu::Descriptor::Action::SetUsbMode},       //
-       {"USIO Taiko", Menu::Descriptor::Action::SetUsbMode}},//
-      0}},                                                   //
+    {Menu::Page::DeviceMode,                                  //
+     {Menu::Descriptor::Type::Selection,                      //
+      "Mode",                                                 //
+      {{"Keybrd P1", Menu::Descriptor::Action::SetUsbMode},   //
+       {"Keybrd P2", Menu::Descriptor::Action::SetUsbMode},   //
+       {"Swtch Tata", Menu::Descriptor::Action::SetUsbMode},  //
+       {"PS4 Tata", Menu::Descriptor::Action::SetUsbMode},    //
+       {"Joystick", Menu::Descriptor::Action::SetUsbMode},    //
+       {"USIO Taiko", Menu::Descriptor::Action::SetUsbMode},  //
+       {"MIDI", Menu::Descriptor::Action::SetUsbMode}},       //
+      0}},                                                    //
 
     {Menu::Page::Drum,                                                           //
      {Menu::Descriptor::Type::Menu,                                              //

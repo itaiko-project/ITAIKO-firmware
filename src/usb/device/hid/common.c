@@ -1,7 +1,6 @@
 #include "usb/device/hid/common.h"
 
 #include "usb/device/hid/keyboard_driver.h"
-#include "usb/device/hid/ps3_driver.h"
 #include "usb/device/hid/ps4_driver.h"
 #include "usb/device/hid/switch_driver.h"
 #include "usb/device_driver.h"
@@ -13,12 +12,8 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_t
                                uint16_t reqlen) {
     switch (usbd_driver_get_mode()) {
     case USB_MODE_SWITCH_TATACON:
-    case USB_MODE_SWITCH_HORIPAD:
         return hid_switch_get_report_cb(instance, report_id, report_type, buffer, reqlen);
-    case USB_MODE_DUALSHOCK3:
-        return hid_ps3_get_report_cb(instance, report_id, report_type, buffer, reqlen);
     case USB_MODE_PS4_TATACON:
-    case USB_MODE_DUALSHOCK4:
         return hid_ps4_get_report_cb(instance, report_id, report_type, buffer, reqlen);
     case USB_MODE_KEYBOARD_P1:
     case USB_MODE_KEYBOARD_P2:
@@ -34,14 +29,9 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
                            uint16_t bufsize) {
     switch (usbd_driver_get_mode()) {
     case USB_MODE_SWITCH_TATACON:
-    case USB_MODE_SWITCH_HORIPAD:
         hid_switch_set_report_cb(instance, report_id, report_type, buffer, bufsize);
         break;
-    case USB_MODE_DUALSHOCK3:
-        hid_ps3_set_report_cb(instance, report_id, report_type, buffer, bufsize);
-        break;
     case USB_MODE_PS4_TATACON:
-    case USB_MODE_DUALSHOCK4:
         hid_ps4_set_report_cb(instance, report_id, report_type, buffer, bufsize);
         break;
     case USB_MODE_KEYBOARD_P1:
@@ -54,15 +44,6 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
 }
 
 bool hid_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const *request) {
-    // Magic byte sequence to enable PS button on PS3
-    static const uint8_t magic_init_bytes[8] = {0x21, 0x26, 0x01, 0x07, 0x00, 0x00, 0x00, 0x00};
-
-    if (usbd_driver_get_mode() == USB_MODE_DUALSHOCK3 && stage == CONTROL_STAGE_SETUP &&
-        request->bmRequestType == 0xA1 && request->bRequest == HID_REQ_CONTROL_GET_REPORT &&
-        request->wValue == 0x0300) {
-        return tud_hid_report(0, magic_init_bytes, sizeof(magic_init_bytes));
-    }
-
     return hidd_control_xfer_cb(rhport, stage, request);
 }
 
@@ -71,12 +52,8 @@ uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) {
 
     switch (usbd_driver_get_mode()) {
     case USB_MODE_SWITCH_TATACON:
-    case USB_MODE_SWITCH_HORIPAD:
         return switch_desc_hid_report;
-    case USB_MODE_DUALSHOCK3:
-        return ps3_desc_hid_report;
     case USB_MODE_PS4_TATACON:
-    case USB_MODE_DUALSHOCK4:
         return ps4_desc_hid_report;
     case USB_MODE_KEYBOARD_P1:
     case USB_MODE_KEYBOARD_P2:

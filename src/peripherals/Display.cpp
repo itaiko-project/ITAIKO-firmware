@@ -18,30 +18,20 @@ namespace {
 #ifndef NO_SCREEN
 std::string modeToString(usb_mode_t mode) {
     switch (mode) {
-    case USB_MODE_SWITCH_TATACON:
-        return "Switch Tatacon";
-    case USB_MODE_SWITCH_HORIPAD:
-        return "Switch Horipad";
-    case USB_MODE_DUALSHOCK3:
-        return "Dualshock 3";
-    case USB_MODE_PS4_TATACON:
-        return "PS4 Tatacon";
-    case USB_MODE_DUALSHOCK4:
-        return "Dualshock 4";
     case USB_MODE_KEYBOARD_P1:
         return "Keyboard P1";
     case USB_MODE_KEYBOARD_P2:
         return "Keyboard P2";
+    case USB_MODE_SWITCH_TATACON:
+        return "Switch Tatacon";
+    case USB_MODE_PS4_TATACON:
+        return "PS4 Tatacon";
     case USB_MODE_XBOX360:
-        return "Xbox 360";
-    case USB_MODE_XBOX360_ANALOG_P1:
-        return "Analog P1";
-    case USB_MODE_XBOX360_ANALOG_P2:
-        return "Analog P2";
-    case USB_MODE_MIDI:
-        return "MIDI";
+        return "Joystick";
     case USB_MODE_USIO_TAIKO:
         return "USIO Taiko";
+    case USB_MODE_MIDI:
+        return "MIDI";
     }
     return "?";
 }

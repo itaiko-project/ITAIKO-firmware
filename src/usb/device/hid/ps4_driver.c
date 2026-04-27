@@ -24,23 +24,6 @@ const tusb_desc_device_t ps4_tatacon_desc_device = {
     .bNumConfigurations = 1,
 };
 
-const tusb_desc_device_t ds4_desc_device = {
-    .bLength = sizeof(tusb_desc_device_t),
-    .bDescriptorType = TUSB_DESC_DEVICE,
-    .bcdUSB = 0x0200,
-    .bDeviceClass = TUSB_CLASS_UNSPECIFIED,
-    .bDeviceSubClass = 0x00,
-    .bDeviceProtocol = 0x00,
-    .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
-    .idVendor = 0x054C,  // Sny
-    .idProduct = 0x05C4, // Dualshock 4
-    .bcdDevice = 0x0100,
-    .iManufacturer = USBD_STR_MANUFACTURER,
-    .iProduct = USBD_STR_PRODUCT,
-    .iSerialNumber = USBD_STR_SERIAL,
-    .bNumConfigurations = 1,
-};
-
 enum {
     USBD_ITF_HID,
     USBD_ITF_MAX,
@@ -450,18 +433,6 @@ void hid_ps4_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t rep
     default:
         break;
     }
-}
-
-const usbd_driver_t *get_hid_ds4_device_driver() {
-    static const usbd_driver_t hid_ds4_device_driver = {
-        .name = "DS4",
-        .app_driver = &hid_app_driver,
-        .desc_device = &ds4_desc_device,
-        .desc_cfg = ps4_desc_cfg,
-        .desc_bos = NULL,
-        .send_report = send_hid_ps4_report,
-    };
-    return &hid_ds4_device_driver;
 }
 
 const usbd_driver_t *get_hid_ps4_tatacon_device_driver() {
