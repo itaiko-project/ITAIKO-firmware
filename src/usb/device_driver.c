@@ -1,7 +1,6 @@
 #include "usb/device_driver.h"
 
 #include "usb/device/hid/keyboard_driver.h"
-#include "usb/device/hid/ps3_driver.h"
 #include "usb/device/hid/ps4_driver.h"
 #include "usb/device/hid/switch_driver.h"
 #include "usb/device/midi_driver.h"
@@ -18,7 +17,7 @@ enum {
     DESC_STR_MAX = 127,
 };
 
-static usb_mode_t usbd_mode = USB_MODE_SWITCH_TATACON;
+static usb_mode_t usbd_mode = USB_MODE_KEYBOARD_P1;
 static const usbd_driver_t *usbd_driver = NULL;
 static usbd_player_led_cb_t usbd_player_led_cb = NULL;
 
@@ -39,24 +38,13 @@ void usbd_driver_init(usb_mode_t mode) {
     case USB_MODE_SWITCH_TATACON:
         usbd_driver = get_hid_switch_tatacon_device_driver();
         break;
-    case USB_MODE_SWITCH_HORIPAD:
-        usbd_driver = get_hid_switch_horipad_device_driver();
-        break;
-    case USB_MODE_DUALSHOCK3:
-        usbd_driver = get_hid_ds3_device_driver();
-        break;
     case USB_MODE_PS4_TATACON:
         usbd_driver = get_hid_ps4_tatacon_device_driver();
-        break;
-    case USB_MODE_DUALSHOCK4:
-        usbd_driver = get_hid_ds4_device_driver();
         break;
     case USB_MODE_KEYBOARD_P1:
     case USB_MODE_KEYBOARD_P2:
         usbd_driver = get_hid_keyboard_device_driver();
         break;
-    case USB_MODE_XBOX360_ANALOG_P1:
-    case USB_MODE_XBOX360_ANALOG_P2:
     case USB_MODE_XBOX360:
         usbd_driver = get_xinput_device_driver();
         break;
