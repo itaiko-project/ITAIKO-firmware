@@ -278,14 +278,15 @@ typedef struct {
     // Latest input snapshot (from core 0 via send_report hook)
     usio_input_t cached_input;
 
-    // Per-pad synthesized hit envelope. The firmware's debounce pipeline gives us
-    // the rising edge; we then ramp from `peak` down to 0 over USIO_ENVELOPE_MS.
-    // Order: side_left, center_left, center_right, side_right.
-    bool envelope_active[4];
-    bool envelope_prev_triggered[4];
-    bool envelope_needs_start[4];
-    uint32_t envelope_start_ms[4];
-    uint16_t envelope_peak[4];
+    // Previous trigger flags for edge detection. Order: side_left,
+    // center_left, center_right, side_right.
+    bool prev_hit_triggered[4];
+
+    // Latched hit flags for the next Taiko input read. Order: side_left,
+    // center_left, center_right, side_right.
+    bool pending_hit[4];
+    uint8_t last_taiko_frame[0x60];
+    bool last_taiko_frame_valid;
 
     // Track whether a response transfer is in progress on EP 0x82.
     // Set false when all chunks have been sent AND the transfer chain is closed.
@@ -298,41 +299,34 @@ typedef struct {
     bool command_out_seen;
 } usio_interface_t;
 
-// Envelope shape parameters. The pulse must outlive a single game poll cycle
-// (~3 ms) so the rising edge isn't missed, and decay back to 0 well before the
-// next physical strike so consecutive hits register as separate events. 15 ms
-// gives ~5 game polls of visible ramp at the typical poll cadence.
 enum {
-    USIO_ENVELOPE_MS = 15,
-    USIO_ENVELOPE_FIXED_PEAK = 0xFFFF, // fixed peak for all hits
-};
-
-// C3 processed piezo envelope decay curve (scaled to 1024 = 1.0).
-// Optimized 15ms curve for testing Latch-on-Read logic.
-static const uint16_t USIO_ENVELOPE_CURVE[USIO_ENVELOPE_MS + 1] = {
-    1024, 1024, 1024, 1024, 1023, 1021, 1015, 1000, 969, 907, 788, 584, 342, 137, 28, 0
+    USIO_HIT_PEAK = 0xFFFF, // fixed peak for all hits
 };
 
 CFG_TUSB_MEM_SECTION static usio_interface_t usio_itf;
 
 // ----------------------------------------------------------------------------
-// Taiko input frame (register 0x1080, 0x60 bytes)
+// Taiko input frame (registers 0x1080 / 0x1100, 0x60 bytes)
 // ----------------------------------------------------------------------------
 
-static void build_taiko_frame(uint8_t out[0x60]) {
+static void build_taiko_frame(uint8_t out[0x60], bool advance_input) {
     memset(out, 0, 0x60);
 
     const bool coin_raw = usio_itf.cached_input.btn_coin_raw;
-    if (coin_raw && !usio_itf.prev_coin_raw) {
+    if (advance_input && coin_raw && !usio_itf.prev_coin_raw) {
         usio_itf.coin_counter++;
     }
-    usio_itf.prev_coin_raw = coin_raw;
+    if (advance_input) {
+        usio_itf.prev_coin_raw = coin_raw;
+    }
 
     const bool test_raw = usio_itf.cached_input.btn_test_raw;
-    if (test_raw && !usio_itf.prev_test_raw) {
+    if (advance_input && test_raw && !usio_itf.prev_test_raw) {
         usio_itf.test_on = !usio_itf.test_on;
     }
-    usio_itf.prev_test_raw = test_raw;
+    if (advance_input) {
+        usio_itf.prev_test_raw = test_raw;
+    }
 
     uint16_t digital = 0;
     if (usio_itf.test_on)
@@ -352,37 +346,29 @@ static void build_taiko_frame(uint8_t out[0x60]) {
     out[16] = (uint8_t)(usio_itf.coin_counter & 0xFF);
     out[17] = (uint8_t)(usio_itf.coin_counter >> 8);
 
-    // Drum pad amplitudes are 16-bit little-endian force values at offsets
-    // 32 / 34 / 36 / 38, in the order: side-left, center-left, center-right,
-    // side-right. We synthesize a C3-style exponential decay envelope from each
-    // rising-edge trigger so the game sees a real piezo-like pulse (rise → decay → 0)
-    // instead of the held flat value the firmware's debounce produces.
-    const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
-    const uint8_t hit_offsets[4] = {32, 34, 36, 38};
+    uint16_t sample_values[4] = {0, 0, 0, 0};
 
-    for (int i = 0; i < 4; i++) {
-        if (!usio_itf.envelope_active[i]) {
-            continue;
+    if (advance_input) {
+        for (uint8_t input = 0; input < 4; input++) {
+            if (usio_itf.pending_hit[input]) {
+                sample_values[input] = USIO_HIT_PEAK;
+                usio_itf.pending_hit[input] = false;
+            }
         }
+    }
 
-        // Latch-on-Read: If this is the first time the game is seeing this hit,
-        // start the timer now. This guarantees the game sees Curve[0] (Peak).
-        if (usio_itf.envelope_needs_start[i]) {
-            usio_itf.envelope_start_ms[i] = now_ms;
-            usio_itf.envelope_needs_start[i] = false;
-        }
+    for (uint8_t input = 0; input < 4; input++) {
+        const uint16_t v = sample_values[input];
+        const uint8_t off = (uint8_t)(32 + input * 2);
+        out[off] = (uint8_t)(v & 0xFF);
+        out[off + 1] = (uint8_t)(v >> 8);
+    }
 
-        const uint32_t elapsed = now_ms - usio_itf.envelope_start_ms[i];
-        if (elapsed >= USIO_ENVELOPE_MS) {
-            usio_itf.envelope_active[i] = false;
-            continue;
-        }
-        const uint16_t v = (uint16_t)(((uint32_t)usio_itf.envelope_peak[i] * USIO_ENVELOPE_CURVE[elapsed]) >> 10);
-        out[hit_offsets[i]] = (uint8_t)(v & 0xFF);
-        out[hit_offsets[i] + 1] = (uint8_t)(v >> 8);
+    if (advance_input) {
+        memcpy(usio_itf.last_taiko_frame, out, sizeof(usio_itf.last_taiko_frame));
+        usio_itf.last_taiko_frame_valid = true;
     }
 }
-
 
 // ----------------------------------------------------------------------------
 // Read / write / init command handlers
@@ -414,7 +400,17 @@ static void handle_read(uint8_t channel, uint16_t reg, uint16_t length) {
             return;
         case 0x1080: {
             uint8_t frame[0x60];
-            build_taiko_frame(frame);
+            build_taiko_frame(frame, true);
+            stage_response(frame, sizeof(frame), length);
+            return;
+        }
+        case 0x1100: {
+            uint8_t frame[0x60];
+            if (usio_itf.last_taiko_frame_valid) {
+                memcpy(frame, usio_itf.last_taiko_frame, sizeof(frame));
+            } else {
+                build_taiko_frame(frame, false);
+            }
             stage_response(frame, sizeof(frame), length);
             return;
         }
@@ -563,7 +559,7 @@ static uint16_t usio_open(uint8_t rhport, tusb_desc_interface_t const *desc_itf,
     // payload that was in-flight when rpcs3 disappeared, and the game's
     // boot-time USIO check times out.
     //
-    // SRAM contents (usio_sram, file scope) and envelope state are kept
+    // SRAM contents (usio_sram, file scope) and latched input state are kept
     // intentionally — those represent persistent device state, not the
     // transient command pipeline.
     usio_itf.expecting_data = false;
@@ -699,8 +695,8 @@ static const usbd_class_driver_t usio_app_driver = {
 static bool send_usio_report(usb_report_t report) {
     // Not a "report" in the HID sense: we cache the latest input snapshot here
     // and build the Taiko frame on demand inside the command handler. We also
-    // edge-detect each pad's trigger flag so build_taiko_frame can shape a
-    // synthesized decay envelope per hit.
+    // edge-detect each pad's trigger flag so the next 0x1080 read can expose a
+    // single full-scale sample.
     if (!report.data || report.size != sizeof(usio_input_t)) {
         return true;
     }
@@ -713,13 +709,12 @@ static bool send_usio_report(usb_report_t report) {
         usio_itf.cached_input.hit_side_right_triggered,
     };
     for (int i = 0; i < 4; i++) {
-        if (triggered[i] && !usio_itf.envelope_prev_triggered[i]) {
-            usio_itf.envelope_active[i] = true;
-            usio_itf.envelope_needs_start[i] = true;
-            usio_itf.envelope_peak[i] = USIO_ENVELOPE_FIXED_PEAK;
+        if (triggered[i] && !usio_itf.prev_hit_triggered[i]) {
+            usio_itf.pending_hit[i] = true;
         }
-        usio_itf.envelope_prev_triggered[i] = triggered[i];
+        usio_itf.prev_hit_triggered[i] = triggered[i];
     }
+
     return true;
 }
 

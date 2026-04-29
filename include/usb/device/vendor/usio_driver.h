@@ -13,17 +13,16 @@ extern "C" {
 typedef struct {
     // Trigger flags come from the firmware's own debounce / crosstalk pipeline
     // (the same path used by Switch / PS4 / etc), so all the existing user
-    // settings still apply. The driver shapes a synthesized decay envelope on
-    // each rising edge so the game sees a real piezo-like pulse rather than a
-    // flat held value.
+    // settings still apply. The driver queues a peak sample and a zero sample
+    // on each rising edge so the game can drain complete pulses once per frame.
     bool hit_side_left_triggered;
     bool hit_center_left_triggered;
     bool hit_center_right_triggered;
     bool hit_side_right_triggered;
 
-    // Peak amplitude captured at the moment the trigger fired. Used as the
-    // envelope's starting value; the driver applies a floor so soft hits still
-    // clear the game's velocity thresholds.
+    // Peak amplitude captured at the moment the trigger fired. Currently the
+    // USIO driver uses a fixed peak so soft hits still clear the game's
+    // velocity thresholds.
     uint16_t hit_side_left_peak;
     uint16_t hit_center_left_peak;
     uint16_t hit_center_right_peak;
