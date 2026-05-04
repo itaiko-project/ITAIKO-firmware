@@ -215,16 +215,9 @@ usb_report_t InputReport::getUsioReport(const InputState &state) {
 
     m_usio_input = usio_input_t{
         // Re-use the firmware's debounce / crosstalk pipeline for hit detection;
-<<<<<<< HEAD
         // the USIO driver queues a peak/zero pulse for each rising edge, so the
         // game sees a complete hit when it drains the USIO input frame. `analog`
         // still carries the captured peak for future tuning.
-=======
-        // the USIO driver uses each rising edge to start a synthesized C3-style
-        // exponential decay envelope with a fixed peak, so the game sees a real
-        // piezo-like pulse rather than a held value. `analog` still carries the
-        // captured peak but it is ignored by the driver for the envelope scaling.
->>>>>>> a4d12074968877d96b4cf116811aa08766dafe81
         .hit_side_left_triggered = drum.ka_left.triggered,
         .hit_center_left_triggered = drum.don_left.triggered,
         .hit_center_right_triggered = drum.don_right.triggered,
