@@ -6,6 +6,8 @@
 #include "pico/multicore.h"
 #include "pico/time.h"
 #include "tusb.h"
+#include "usb/device/vendor/bpreader_diag.h"
+#include "usb/device/vendor/bpreader_serial.h"
 
 #include <string.h>
 
@@ -32,6 +34,8 @@ const tusb_desc_device_t usio_desc_device = {
 
 enum {
     USBD_ITF_USIO,
+    USBD_ITF_CDC_COMM,
+    USBD_ITF_CDC_DATA,
     USBD_ITF_MAX,
 };
 
@@ -39,6 +43,9 @@ enum {
     TUD_USIO_EP_OUT = 0x01,
     TUD_USIO_EP_IN = 0x82,
     TUD_USIO_EP_STATUS_IN = 0x83,
+    TUD_BPREADER_CDC_EP_NOTIF = 0x84,
+    TUD_BPREADER_CDC_EP_OUT = 0x05,
+    TUD_BPREADER_CDC_EP_IN = 0x85,
     TUD_USIO_EP_BULK_SIZE = 64,
     TUD_USIO_EP_STATUS_SIZE = 8,
     TUD_USIO_DESC_LEN = 9 + 7 + 7 + 7,
@@ -53,11 +60,13 @@ enum {
         0, /* EP IN interrupt (status, never used by rpcs3) */                                                         \
         7, TUSB_DESC_ENDPOINT, _epstatus, TUSB_XFER_INTERRUPT, U16_TO_U8S_LE(TUD_USIO_EP_STATUS_SIZE), 16
 
-#define USBD_DESC_LEN (TUD_CONFIG_DESC_LEN + TUD_USIO_DESC_LEN)
+#define USBD_DESC_LEN (TUD_CONFIG_DESC_LEN + TUD_USIO_DESC_LEN + TUD_CDC_DESC_LEN)
 
 const uint8_t usio_desc_cfg[USBD_DESC_LEN] = {
     TUD_CONFIG_DESCRIPTOR(1, USBD_ITF_MAX, USBD_STR_LANGUAGE, USBD_DESC_LEN, 0xC0, 100 /* 100mA */),
     TUD_USIO_DESCRIPTOR(USBD_ITF_USIO, 0, TUD_USIO_EP_OUT, TUD_USIO_EP_IN, TUD_USIO_EP_STATUS_IN),
+    TUD_CDC_DESCRIPTOR(USBD_ITF_CDC_COMM, 0, TUD_BPREADER_CDC_EP_NOTIF, 8, TUD_BPREADER_CDC_EP_OUT,
+                       TUD_BPREADER_CDC_EP_IN, 64),
 };
 
 // ----------------------------------------------------------------------------
@@ -313,6 +322,154 @@ enum {
 
 CFG_TUSB_MEM_SECTION static usio_interface_t usio_itf;
 
+static void stage_response(const uint8_t *src, uint16_t src_size, uint16_t requested);
+
+enum {
+    BPREADER_CDC_RX_BUF_SIZE = 128,
+    BPREADER_CDC_TX_BUF_SIZE = 128,
+    BPREADER_FRAME_WAIT = 0xFFFF,
+};
+
+static uint8_t bpreader_cdc_rx_buf[BPREADER_CDC_RX_BUF_SIZE];
+static uint16_t bpreader_cdc_rx_len = 0;
+
+static uint8_t bpreader_usio_rx_buf[BPREADER_CDC_RX_BUF_SIZE];
+static uint16_t bpreader_usio_rx_len = 0;
+static uint8_t bpreader_usio_tx_buf[USIO_RESPONSE_BUF_SIZE];
+static uint16_t bpreader_usio_tx_len = 0;
+
+static uint16_t bpreader_frame_len(const uint8_t *buf, uint16_t len) {
+    if (len == 0) {
+        return 0;
+    }
+
+    if (buf[0] == 0x55) {
+        return 1;
+    }
+
+    if (buf[0] != 0x00) {
+        return 0;
+    }
+    if (len == 1) {
+        return BPREADER_FRAME_WAIT;
+    }
+
+    if (buf[1] != 0x00) {
+        return 0;
+    }
+    if (len == 2) {
+        return BPREADER_FRAME_WAIT;
+    }
+
+    if (buf[2] != 0xFF) {
+        return 0;
+    }
+    if (len < 5) {
+        return BPREADER_FRAME_WAIT;
+    }
+
+    if (buf[3] == 0x00 && buf[4] == 0xFF) {
+        if (len < 6) {
+            return BPREADER_FRAME_WAIT;
+        }
+        return buf[5] == 0x00 ? 6 : 0;
+    }
+
+    return (uint16_t)buf[3] + 7;
+}
+
+static void bpreader_cdc_pump(void) {
+    uint8_t tx[BPREADER_CDC_TX_BUF_SIZE];
+
+    while (bpreader_cdc_rx_len > 0) {
+        const uint16_t frame_len = bpreader_frame_len(bpreader_cdc_rx_buf, bpreader_cdc_rx_len);
+        if (frame_len == BPREADER_FRAME_WAIT) {
+            return;
+        }
+        if (frame_len == 0) {
+            memmove(bpreader_cdc_rx_buf, &bpreader_cdc_rx_buf[1], --bpreader_cdc_rx_len);
+            continue;
+        }
+        if (bpreader_cdc_rx_len < frame_len) {
+            return;
+        }
+
+        const size_t tx_len = bpreader_serial_process(bpreader_cdc_rx_buf, frame_len, tx, sizeof(tx));
+        if (tx_len > 0) {
+            tud_cdc_n_write(0, tx, (uint32_t)tx_len);
+            tud_cdc_n_write_flush(0);
+        }
+
+        bpreader_cdc_rx_len = (uint16_t)(bpreader_cdc_rx_len - frame_len);
+        if (bpreader_cdc_rx_len > 0) {
+            memmove(bpreader_cdc_rx_buf, &bpreader_cdc_rx_buf[frame_len], bpreader_cdc_rx_len);
+        }
+    }
+}
+
+static void bpreader_usio_queue_tx(const uint8_t *tx, size_t tx_len) {
+    if (!tx || tx_len == 0) {
+        return;
+    }
+
+    const size_t cap = sizeof(bpreader_usio_tx_buf) - bpreader_usio_tx_len;
+    if (tx_len > cap) {
+        bpreader_usio_tx_len = 0;
+    }
+
+    if (tx_len <= sizeof(bpreader_usio_tx_buf)) {
+        memcpy(&bpreader_usio_tx_buf[bpreader_usio_tx_len], tx, tx_len);
+        bpreader_usio_tx_len = (uint16_t)(bpreader_usio_tx_len + tx_len);
+    }
+}
+
+static void bpreader_usio_feed(const uint8_t *rx, uint16_t rx_len) {
+    uint8_t tx[BPREADER_CDC_TX_BUF_SIZE];
+
+    if (!rx || rx_len == 0) {
+        return;
+    }
+
+    if ((uint32_t)bpreader_usio_rx_len + rx_len > sizeof(bpreader_usio_rx_buf)) {
+        bpreader_usio_rx_len = 0;
+    }
+
+    memcpy(&bpreader_usio_rx_buf[bpreader_usio_rx_len], rx, rx_len);
+    bpreader_usio_rx_len = (uint16_t)(bpreader_usio_rx_len + rx_len);
+
+    while (bpreader_usio_rx_len > 0) {
+        const uint16_t frame_len = bpreader_frame_len(bpreader_usio_rx_buf, bpreader_usio_rx_len);
+        if (frame_len == BPREADER_FRAME_WAIT) {
+            return;
+        }
+        if (frame_len == 0) {
+            memmove(bpreader_usio_rx_buf, &bpreader_usio_rx_buf[1], --bpreader_usio_rx_len);
+            continue;
+        }
+        if (bpreader_usio_rx_len < frame_len) {
+            return;
+        }
+
+        const size_t tx_len = bpreader_serial_process(bpreader_usio_rx_buf, frame_len, tx, sizeof(tx));
+        bpreader_usio_queue_tx(tx, tx_len);
+
+        bpreader_usio_rx_len = (uint16_t)(bpreader_usio_rx_len - frame_len);
+        if (bpreader_usio_rx_len > 0) {
+            memmove(bpreader_usio_rx_buf, &bpreader_usio_rx_buf[frame_len], bpreader_usio_rx_len);
+        }
+    }
+}
+
+static void bpreader_usio_stage_read(uint16_t length) {
+    const uint16_t n = (bpreader_usio_tx_len < length) ? bpreader_usio_tx_len : length;
+    stage_response(bpreader_usio_tx_buf, n, length);
+
+    bpreader_usio_tx_len = (uint16_t)(bpreader_usio_tx_len - n);
+    if (bpreader_usio_tx_len > 0) {
+        memmove(bpreader_usio_tx_buf, &bpreader_usio_tx_buf[n], bpreader_usio_tx_len);
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Taiko input frame (registers 0x1080 / 0x1100, 0x60 bytes)
 // ----------------------------------------------------------------------------
@@ -400,11 +557,17 @@ static void handle_read(uint8_t channel, uint16_t reg, uint16_t length) {
         case 0x0000:
             stage_response(USIO_KEEPALIVE, sizeof(USIO_KEEPALIVE), length);
             return;
-        case 0x0080:
-            stage_response(USIO_CARD_READER_1, sizeof(USIO_CARD_READER_1), length);
+        case 0x0080: {
+            bpreader_diag_mark(BPREADER_DIAG_USIO_STATUS_READ);
+            uint8_t status[sizeof(USIO_CARD_READER_1)];
+            memcpy(status, USIO_CARD_READER_1, sizeof(status));
+            status[2] = (uint8_t)((bpreader_usio_tx_len > 0xFF) ? 0xFF : bpreader_usio_tx_len);
+            stage_response(status, sizeof(status), length);
             return;
+        }
         case 0x7000:
-            stage_response(NULL, 0, length);
+            bpreader_diag_mark(BPREADER_DIAG_USIO_DATA_READ);
+            bpreader_usio_stage_read(length);
             return;
         case 0x4954: // HW Ident Check
             stage_response(USIO_FPGA_VER_IDENT, sizeof(USIO_FPGA_VER_IDENT), length);
@@ -458,6 +621,11 @@ static void handle_read(uint8_t channel, uint16_t reg, uint16_t length) {
 }
 
 static void handle_write(uint8_t channel, uint16_t reg, const uint8_t *data, uint16_t size) {
+    if (channel == 0 && (reg == 0x7000 || reg == 0x7400)) {
+        bpreader_diag_mark(BPREADER_DIAG_USIO_DATA_WRITE);
+        bpreader_usio_feed(data, size);
+    }
+
     if (channel >= 2 && size > 0 && data != NULL) {
         const uint8_t page = (uint8_t)(channel - 2);
         const uint32_t end = (uint32_t)reg + size;
@@ -549,7 +717,9 @@ static void usio_reset(uint8_t rhport) {
 
 static void usio_init_cb(void) {
     usio_reset(0);
+    bpreader_diag_init();
     usio_store_load();
+    bpreader_serial_init();
 }
 
 static uint16_t usio_open(uint8_t rhport, tusb_desc_interface_t const *desc_itf, uint16_t max_len) {
@@ -602,6 +772,7 @@ static uint16_t usio_open(uint8_t rhport, tusb_desc_interface_t const *desc_itf,
 
     // Start listening on the OUT endpoint.
     TU_ASSERT(usbd_edpt_xfer(rhport, usio_itf.ep_out, usio_itf.epout_buf, sizeof(usio_itf.epout_buf)), 0);
+    bpreader_diag_mark(BPREADER_DIAG_USB_OPEN);
     arm_status_in(rhport);
     arm_pre_command_idle_zlp(rhport);
     return drv_len;
@@ -712,6 +883,7 @@ static bool send_usio_report(usb_report_t report) {
         return true;
     }
     memcpy(&usio_itf.cached_input, report.data, sizeof(usio_input_t));
+    bpreader_serial_set_card_present(usio_itf.cached_input.bpreader_card_present);
 
     const bool triggered[4] = {
         usio_itf.cached_input.hit_side_left_triggered,
@@ -739,4 +911,24 @@ const usbd_driver_t *get_usio_device_driver(void) {
         .send_report = send_usio_report,
     };
     return &usio_device_driver;
+}
+
+void tud_cdc_rx_cb(uint8_t itf) {
+    if (itf != 0) {
+        return;
+    }
+
+    bpreader_diag_mark(BPREADER_DIAG_CDC_RX);
+
+    while (tud_cdc_n_available(0)) {
+        const uint32_t space = sizeof(bpreader_cdc_rx_buf) - bpreader_cdc_rx_len;
+        if (space == 0) {
+            bpreader_cdc_rx_len = 0;
+            return;
+        }
+
+        const uint32_t count = tud_cdc_n_read(0, &bpreader_cdc_rx_buf[bpreader_cdc_rx_len], space);
+        bpreader_cdc_rx_len = (uint16_t)(bpreader_cdc_rx_len + count);
+        bpreader_cdc_pump();
+    }
 }

@@ -232,6 +232,7 @@ usb_report_t InputReport::getUsioReport(const InputState &state) {
         .btn_down = ctrl.dpad.down,
         .btn_coin_raw = ctrl.buttons.share,
         .btn_test_raw = ctrl.buttons.home,
+        .bpreader_card_present = ctrl.buttons.south,
     };
 
     return {reinterpret_cast<uint8_t *>(&m_usio_input), sizeof(usio_input_t)};

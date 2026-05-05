@@ -35,6 +35,8 @@ typedef struct {
 
     bool btn_coin_raw; // Share; driver detects rising edge
     bool btn_test_raw; // Home;  driver toggles latched state on rising edge
+
+    bool bpreader_card_present; // South/A; card is present while held
 } usio_input_t;
 
 const usbd_driver_t *get_usio_device_driver(void);
