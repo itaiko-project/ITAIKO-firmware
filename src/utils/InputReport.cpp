@@ -218,21 +218,21 @@ usb_report_t InputReport::getUsioReport(const InputState &state) {
         // the USIO driver queues a peak/zero pulse for each rising edge, so the
         // game sees a complete hit when it drains the USIO input frame. `analog`
         // still carries the captured peak for future tuning.
-        .hit_side_left_triggered = drum.ka_left.triggered,
-        .hit_center_left_triggered = drum.don_left.triggered,
-        .hit_center_right_triggered = drum.don_right.triggered,
-        .hit_side_right_triggered = drum.ka_right.triggered,
+        .hit_side_left_triggered = drum.ka_left.triggered || ctrl.dpad.up,
+        .hit_center_left_triggered = drum.don_left.triggered || ctrl.dpad.right,
+        .hit_center_right_triggered = drum.don_right.triggered || ctrl.buttons.west,
+        .hit_side_right_triggered = drum.ka_right.triggered || ctrl.buttons.north,
         .hit_side_left_peak = drum.ka_left.analog,
         .hit_center_left_peak = drum.don_left.analog,
         .hit_center_right_peak = drum.don_right.analog,
         .hit_side_right_peak = drum.ka_right.analog,
-        .btn_enter = ctrl.buttons.start,
+        .btn_enter = ctrl.buttons.east,
         .btn_service = ctrl.buttons.select,
         .btn_up = ctrl.dpad.up,
         .btn_down = ctrl.dpad.down,
         .btn_coin_raw = ctrl.buttons.share,
         .btn_test_raw = ctrl.buttons.home,
-        .bpreader_card_present = ctrl.buttons.south,
+        .bpreader_card_present = ctrl.buttons.start,
     };
 
     return {reinterpret_cast<uint8_t *>(&m_usio_input), sizeof(usio_input_t)};
