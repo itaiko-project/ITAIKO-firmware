@@ -40,6 +40,7 @@ typedef struct {
 } usio_input_t;
 
 const usbd_driver_t *get_usio_device_driver(void);
+void usio_clear_nvram(void);
 
 #ifdef __cplusplus
 }

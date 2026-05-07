@@ -1,6 +1,7 @@
 #include "utils/Menu.h"
 
 #include "peripherals/Drum.h"
+#include "usb/device/vendor/usio_driver.h"
 
 namespace Doncon::Utils {
 
@@ -13,6 +14,7 @@ const std::map<Menu::Page, const Menu::Descriptor> Menu::descriptors = {
        {"Drum", Menu::Descriptor::Action::GotoPageDrum},          //
        {"Led", Menu::Descriptor::Action::GotoPageLed},            //
        {"Reset", Menu::Descriptor::Action::GotoPageReset},        //
+       {"USIO NVRAM", Menu::Descriptor::Action::GotoPageResetUsioNvram}, //
        {"USB Flash", Menu::Descriptor::Action::GotoPageBootsel},  //
        {"Version", Menu::Descriptor::Action::GotoPageVersion},     //
        {"PS4 Key", Menu::Descriptor::Action::GotoPagePS4Auth}},   //
@@ -224,6 +226,13 @@ const std::map<Menu::Page, const Menu::Descriptor> Menu::descriptors = {
        {"Yes", Menu::Descriptor::Action::DoReset}},  //
       0}},                                           //
 
+    {Menu::Page::ResetUsioNvram,                     //
+     {Menu::Descriptor::Type::Menu,                  //
+      "Clear USIO NVRAM?",                           //
+      {{"No", Menu::Descriptor::Action::GotoParent}, //
+       {"Yes", Menu::Descriptor::Action::DoResetUsioNvram}}, //
+      0}},                                           //
+
     {Menu::Page::Bootsel,                                         //
      {Menu::Descriptor::Type::Menu,                               //
       "Reboot to Flash Mode",                                     //
@@ -361,6 +370,7 @@ uint16_t Menu::getCurrentValue(Menu::Page page) {
     case Page::DrumCutoffThresholds:
     case Page::Led:
     case Page::Reset:
+    case Page::ResetUsioNvram:
     case Page::Bootsel:
     case Page::BootselMsg:
     case Page::Version:
@@ -495,6 +505,7 @@ void Menu::gotoParent(bool do_restore) {
         case Page::DrumCutoffThresholds:
         case Page::Led:
         case Page::Reset:
+        case Page::ResetUsioNvram:
         case Page::Bootsel:
         case Page::BootselMsg:
         case Page::Version:
@@ -537,6 +548,9 @@ void Menu::performAction(Descriptor::Action action, uint16_t value) {
         break;
     case Descriptor::Action::GotoPageReset:
         gotoPage(Page::Reset);
+        break;
+    case Descriptor::Action::GotoPageResetUsioNvram:
+        gotoPage(Page::ResetUsioNvram);
         break;
     case Descriptor::Action::GotoPageBootsel:
         gotoPage(Page::Bootsel);
@@ -709,6 +723,10 @@ void Menu::performAction(Descriptor::Action action, uint16_t value) {
         break;
     case Descriptor::Action::DoReset:
         m_store->reset();
+        break;
+    case Descriptor::Action::DoResetUsioNvram:
+        usio_clear_nvram();
+        gotoParent(false);
         break;
     case Descriptor::Action::DoRebootToBootsel:
         m_store->scheduleReboot(true);

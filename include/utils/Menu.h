@@ -21,6 +21,7 @@ class Menu {
         Drum,
         Led,
         Reset,
+        ResetUsioNvram,
         Bootsel,
 
         DrumDebounceDelay,
@@ -83,6 +84,7 @@ class Menu {
             GotoPageDrum,
             GotoPageLed,
             GotoPageReset,
+            GotoPageResetUsioNvram,
             GotoPageBootsel,
 
             GotoPageDrumDebounceDelay,
@@ -146,6 +148,7 @@ class Menu {
             SetLedEnablePlayerColor,
 
             DoReset,
+            DoResetUsioNvram,
             DoRebootToBootsel,
         };
 

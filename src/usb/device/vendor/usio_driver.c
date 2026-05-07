@@ -261,6 +261,20 @@ static void usio_store_tick(void) {
     usio_store_commit();
 }
 
+void usio_clear_nvram(void) {
+    memset(usio_sram, 0, sizeof(usio_sram));
+
+    multicore_lockout_start_blocking();
+    const uint32_t interrupts = save_and_disable_interrupts();
+
+    flash_range_erase(USIO_FLASH_OFFSET, USIO_FLASH_TOTAL_SIZE);
+
+    restore_interrupts_from_disabled(interrupts);
+    multicore_lockout_end_blocking();
+
+    usio_store_dirty = false;
+}
+
 typedef struct {
     uint8_t itf_num;
     uint8_t ep_out;
