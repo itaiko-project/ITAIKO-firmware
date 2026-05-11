@@ -8,6 +8,7 @@
 #include "tusb.h"
 #include "usb/device/vendor/bpreader_diag.h"
 #include "usb/device/vendor/bpreader_serial.h"
+#include "usb/device_driver.h"
 
 #include <string.h>
 
@@ -930,6 +931,9 @@ const usbd_driver_t *get_usio_device_driver(void) {
 void tud_cdc_rx_cb(uint8_t itf) {
     if (itf != 0) {
         return;
+    }
+    if (usbd_driver_get_mode() != USB_MODE_USIO_TAIKO) {
+        return; // CDC owned by SerialConfig / stdio in non-USIO modes
     }
 
     bpreader_diag_mark(BPREADER_DIAG_CDC_RX);
