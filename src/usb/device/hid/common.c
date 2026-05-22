@@ -48,8 +48,6 @@ bool hid_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t c
 }
 
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) {
-    (void)instance;
-
     switch (usbd_driver_get_mode()) {
     case USB_MODE_SWITCH_TATACON:
         return switch_desc_hid_report;
@@ -57,7 +55,7 @@ uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) {
         return ps4_desc_hid_report;
     case USB_MODE_KEYBOARD_P1:
     case USB_MODE_KEYBOARD_P2:
-        return keyboard_desc_hid_report;
+        return instance == 0 ? keyboard_desc_hid_report : keyboard_desc_hid_consumer_report;
     default:
         break;
     }
