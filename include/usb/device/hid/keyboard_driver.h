@@ -15,7 +15,15 @@ typedef struct __attribute((packed, aligned(1))) {
     uint8_t keycodes[32];
 } hid_nkro_keyboard_report_t;
 
+typedef struct __attribute((packed, aligned(1))) {
+    uint8_t modifier;
+    uint8_t reserved;
+    uint8_t keycodes[6];
+} hid_boot_keyboard_report_t;
+
 extern const uint8_t keyboard_desc_hid_report[];
+extern const uint8_t keyboard_desc_hid_consumer_report[];
+const uint8_t *get_keyboard_consumer_report_desc(void);
 
 const usbd_driver_t *get_hid_keyboard_device_driver();
 
