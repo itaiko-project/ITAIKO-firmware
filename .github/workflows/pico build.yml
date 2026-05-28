@@ -47,7 +47,7 @@ jobs:
       - name: Node.js Setup
         uses: actions/setup-node@v4
         with:
-          node-version: 'lts/*'
+          node-version: '22'
 
       - name: Semantic Release (Dry Run)
         id: semantic
