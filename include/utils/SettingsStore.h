@@ -46,6 +46,7 @@ class SettingsStore {
                 DrumKeys drum_keys_p2;
                 ControllerKeys controller_keys;
                 Peripherals::Drum::Config::AdcChannels adc_channels;
+                uint8_t ps3_mac[6];
             };
             uint8_t raw[m_store_size];
         };
@@ -137,6 +138,10 @@ class SettingsStore {
 
     void setAdcChannels(const Peripherals::Drum::Config::AdcChannels &channels);
     [[nodiscard]] Peripherals::Drum::Config::AdcChannels getAdcChannels() const;
+
+    void setPs3Mac(const uint8_t mac[6]);
+    void getPs3Mac(uint8_t mac[6]) const;
+    [[nodiscard]] bool hasPs3Mac() const;
 
     void scheduleReboot(bool bootsel = false);
 

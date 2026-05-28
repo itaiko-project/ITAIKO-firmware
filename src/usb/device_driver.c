@@ -1,6 +1,7 @@
 #include "usb/device_driver.h"
 
 #include "usb/device/hid/keyboard_driver.h"
+#include "usb/device/hid/ps3_driver.h"
 #include "usb/device/hid/ps4_driver.h"
 #include "usb/device/hid/switch_driver.h"
 #include "usb/device/midi_driver.h"
@@ -37,6 +38,9 @@ void usbd_driver_init(usb_mode_t mode) {
     switch (mode) {
     case USB_MODE_SWITCH_TATACON:
         usbd_driver = get_hid_switch_tatacon_device_driver();
+        break;
+    case USB_MODE_DUALSHOCK3:
+        usbd_driver = get_hid_ds3_device_driver();
         break;
     case USB_MODE_PS4_TATACON:
         usbd_driver = get_hid_ps4_tatacon_device_driver();

@@ -7,6 +7,7 @@
 #include "bitmaps/MenuScreens.h"
 #endif
 
+#include <cstdio>
 #include <list>
 #include <numeric>
 #include <string>
@@ -32,6 +33,8 @@ std::string modeToString(usb_mode_t mode) {
         return "USIO Taiko";
     case USB_MODE_MIDI:
         return "MIDI";
+    case USB_MODE_DUALSHOCK3:
+        return "Dualshock 3";
     }
     return "?";
 }
@@ -190,12 +193,23 @@ void Display::drawMenuScreen() {
 
     // Current Selection
     std::string selection;
+    uint8_t selection_scale = 2;
     switch (descriptor_it->second.type) {
     case Utils::Menu::Descriptor::Type::Menu:
     case Utils::Menu::Descriptor::Type::Selection:
     case Utils::Menu::Descriptor::Type::RebootInfo:
     case Utils::Menu::Descriptor::Type::Info:
-        selection = descriptor_it->second.items.at(m_menu_state.selected_value).first;
+        if (m_menu_state.page == Utils::Menu::Page::MacAddress) {
+            uint8_t mac[6];
+            m_settings_store->getPs3Mac(mac);
+            char buf[18];
+            std::snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4],
+                          mac[5]);
+            selection = buf;
+            selection_scale = 1;
+        } else {
+            selection = descriptor_it->second.items.at(m_menu_state.selected_value).first;
+        }
         break;
     case Utils::Menu::Descriptor::Type::Value:
         selection = std::to_string(m_menu_state.selected_value);
@@ -204,7 +218,9 @@ void Display::drawMenuScreen() {
         selection = m_menu_state.selected_value != 0 ? "On" : "Off";
         break;
     }
-    ssd1306_draw_string(&m_display, (127 - (selection.length() * 12)) / 2, 15, 2, selection.c_str());
+    const uint8_t char_width = selection_scale * 6;
+    ssd1306_draw_string(&m_display, (127 - (selection.length() * char_width)) / 2, 15, selection_scale,
+                        selection.c_str());
 
     // Breadcrumbs
     switch (descriptor_it->second.type) {

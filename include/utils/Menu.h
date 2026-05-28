@@ -55,6 +55,7 @@ class Menu {
 
         Version,
         PS4Auth,
+        MacAddress,
 
         BootselMsg,
     };
@@ -116,6 +117,7 @@ class Menu {
 
             GotoPageVersion,
             GotoPagePS4Auth,
+            GotoPageMacAddress,
 
             SetUsbMode,
 

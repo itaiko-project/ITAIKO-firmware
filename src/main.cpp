@@ -2,6 +2,7 @@
 #include "peripherals/Display.h"
 #include "peripherals/Drum.h"
 #include "peripherals/StatusLed.h"
+#include "usb/device/hid/ps3_driver.h"
 #include "usb/device/hid/ps4_auth.h"
 #include "usb/device_driver.h"
 #include "utils/InputReport.h"
@@ -13,6 +14,7 @@
 
 #include "GlobalConfiguration.h"
 
+#include "hardware/adc.h"
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
 #include "pico/time.h"
@@ -21,6 +23,7 @@
 #include <array>
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <variant>
@@ -270,6 +273,34 @@ int main() {
     }
 
     multicore_launch_core1(core1_task);
+    // Give core1 a moment to install its multicore_lockout victim handler before
+    // we trigger a flash write (which uses multicore_lockout_start_blocking).
+    sleep_ms(50);
+
+    uint8_t ps3_mac[6];
+    if (!settings_store->hasPs3Mac()) {
+        // Mix ADC noise from the internal temperature sensor into a 6-byte MAC.
+        // The temp sensor is always present and its LSBs jitter independently of
+        // anything connected to the drum inputs.
+        adc_init();
+        adc_set_temp_sensor_enabled(true);
+        adc_select_input(4);
+        std::memset(ps3_mac, 0, sizeof(ps3_mac));
+        for (int i = 0; i < 50; ++i) {
+            const uint16_t raw = adc_read();
+            ps3_mac[i % 6] ^= static_cast<uint8_t>(raw & 0xFF);
+            ps3_mac[(i + 3) % 6] ^= static_cast<uint8_t>((raw >> 4) & 0xFF);
+            sleep_us(200);
+        }
+        adc_set_temp_sensor_enabled(false);
+        // Force locally-administered unicast MAC.
+        ps3_mac[0] = (ps3_mac[0] & 0xFC) | 0x02;
+        settings_store->setPs3Mac(ps3_mac);
+        settings_store->store();
+    } else {
+        settings_store->getPs3Mac(ps3_mac);
+    }
+    hid_ps3_set_mac(ps3_mac);
 
     usbd_driver_init(mode);
     usbd_driver_set_player_led_cb([](usb_player_led_t player_led) {

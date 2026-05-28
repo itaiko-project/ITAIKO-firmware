@@ -15,7 +15,8 @@ const std::map<Menu::Page, const Menu::Descriptor> Menu::descriptors = {
        {"Reset", Menu::Descriptor::Action::GotoPageReset},        //
        {"USB Flash", Menu::Descriptor::Action::GotoPageBootsel},  //
        {"Version", Menu::Descriptor::Action::GotoPageVersion},     //
-       {"PS4 Key", Menu::Descriptor::Action::GotoPagePS4Auth}},   //
+       {"PS4 Key", Menu::Descriptor::Action::GotoPagePS4Auth},    //
+       {"PS3 MAC", Menu::Descriptor::Action::GotoPageMacAddress}},//
       0}},                                                        //
 
     {Menu::Page::Version,                            //
@@ -31,6 +32,12 @@ const std::map<Menu::Page, const Menu::Descriptor> Menu::descriptors = {
        {"Present", Menu::Descriptor::Action::None}},           //
       0}},                                                     //
 
+    {Menu::Page::MacAddress,                                   //
+     {Menu::Descriptor::Type::Info,                            //
+      "PS3 MAC",                                               //
+      {{"", Menu::Descriptor::Action::None}},                  //
+      0}},                                                     //
+
     {Menu::Page::DeviceMode,                                  //
      {Menu::Descriptor::Type::Selection,                      //
       "Mode",                                                 //
@@ -40,7 +47,8 @@ const std::map<Menu::Page, const Menu::Descriptor> Menu::descriptors = {
        {"PS4 Tata", Menu::Descriptor::Action::SetUsbMode},    //
        {"Joystick", Menu::Descriptor::Action::SetUsbMode},    //
        {"USIO Taiko", Menu::Descriptor::Action::SetUsbMode},  //
-       {"MIDI", Menu::Descriptor::Action::SetUsbMode}},       //
+       {"MIDI", Menu::Descriptor::Action::SetUsbMode},        //
+       {"Dualshock3", Menu::Descriptor::Action::SetUsbMode}}, //
       0}},                                                    //
 
     {Menu::Page::Drum,                                                           //
@@ -367,6 +375,8 @@ uint16_t Menu::getCurrentValue(Menu::Page page) {
         break;
     case Page::PS4Auth:
         return m_store->hasPS4AuthCredentials() ? 1 : 0;
+    case Page::MacAddress:
+        break;
     }
 
     return 0;
@@ -499,6 +509,7 @@ void Menu::gotoParent(bool do_restore) {
         case Page::BootselMsg:
         case Page::Version:
         case Page::PS4Auth:
+        case Page::MacAddress:
             break;
         }
     }
@@ -546,6 +557,9 @@ void Menu::performAction(Descriptor::Action action, uint16_t value) {
         break;
     case Descriptor::Action::GotoPagePS4Auth:
         gotoPage(Page::PS4Auth);
+        break;
+    case Descriptor::Action::GotoPageMacAddress:
+        gotoPage(Page::MacAddress);
         break;
     case Descriptor::Action::GotoPageDrumDebounceDelay:
         gotoPage(Page::DrumDebounceDelay);

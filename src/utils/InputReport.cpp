@@ -63,6 +63,37 @@ usb_report_t InputReport::getSwitchReport(const InputState &state) {
     return {reinterpret_cast<uint8_t *>(&m_switch_report), sizeof(hid_switch_report_t)};
 }
 
+usb_report_t InputReport::getPS3Report(const InputState &state) {
+    const auto &controller = state.controller;
+    const auto &drum = state.drum;
+
+    m_ps3_report.buttons1 = 0                                                          //
+                            | (controller.buttons.select ? (1 << 0) : 0)               // Select
+                            | (controller.buttons.l ? (1 << 1) : 0)                    // L3
+                            | (controller.buttons.r ? (1 << 2) : 0)                    // R3
+                            | (controller.buttons.start ? (1 << 3) : 0)                // Start
+                            | (controller.dpad.up ? (1 << 4) : 0)                      // Up
+                            | (controller.dpad.right ? (1 << 5) : 0)                   // Right
+                            | ((controller.dpad.down || drum.don_left.triggered)       //
+                                   ? (1 << 6)                                          //
+                                   : 0)                                                // Down
+                            | ((controller.dpad.left || drum.ka_left.triggered)        //
+                                   ? (1 << 7)                                          //
+                                   : 0);                                               // Left
+    m_ps3_report.buttons2 = 0                                                          //
+                            | (controller.buttons.north ? (1 << 4) : 0)                // Triangle
+                            | ((controller.buttons.east || drum.ka_right.triggered)    //
+                                   ? (1 << 5)                                          //
+                                   : 0)                                                // Circle
+                            | ((controller.buttons.south || drum.don_right.triggered)  //
+                                   ? (1 << 6)                                          //
+                                   : 0)                                                // Cross
+                            | (controller.buttons.west ? (1 << 7) : 0);                // Square
+    m_ps3_report.buttons3 = 0 | (controller.buttons.home ? (1 << 0) : 0);              // Home
+
+    return {reinterpret_cast<uint8_t *>(&m_ps3_report), sizeof(hid_ps3_report_t)};
+}
+
 usb_report_t InputReport::getPS4Report(const InputState &state) {
     const auto &controller = state.controller;
     const auto &drum = state.drum;
@@ -241,6 +272,8 @@ usb_report_t InputReport::getReport(const InputState &state, usb_mode_t mode) {
     switch (mode) {
     case USB_MODE_SWITCH_TATACON:
         return getSwitchReport(state);
+    case USB_MODE_DUALSHOCK3:
+        return getPS3Report(state);
     case USB_MODE_PS4_TATACON:
         return getPS4Report(state);
     case USB_MODE_KEYBOARD_P1:

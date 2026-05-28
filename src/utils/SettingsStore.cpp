@@ -50,7 +50,8 @@ SettingsStore::SettingsStore()
                      .drum_keys_p1 = Config::Default::drum_keys_p1,
                      .drum_keys_p2 = Config::Default::drum_keys_p2,
                      .controller_keys = Config::Default::controller_keys,
-                     .adc_channels = Config::Default::drum_config.adc_channels}) {
+                     .adc_channels = Config::Default::drum_config.adc_channels,
+                     .ps3_mac = {0, 0, 0, 0, 0, 0}}) {
     uint32_t current_page = m_flash_offset + m_flash_size - m_store_size;
     bool found_valid = false;
     for (size_t i = 0; i < m_store_pages; ++i) {
@@ -258,6 +259,22 @@ void SettingsStore::setAdcChannels(const Peripherals::Drum::Config::AdcChannels 
     }
 }
 Peripherals::Drum::Config::AdcChannels SettingsStore::getAdcChannels() const { return m_store_cache.adc_channels; }
+
+void SettingsStore::setPs3Mac(const uint8_t mac[6]) {
+    if (std::memcmp(m_store_cache.ps3_mac, mac, 6) != 0) {
+        std::memcpy(m_store_cache.ps3_mac, mac, 6);
+        m_dirty = true;
+    }
+}
+void SettingsStore::getPs3Mac(uint8_t mac[6]) const { std::memcpy(mac, m_store_cache.ps3_mac, 6); }
+bool SettingsStore::hasPs3Mac() const {
+    for (uint8_t b : m_store_cache.ps3_mac) {
+        if (b != 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 void SettingsStore::store() {
     if (m_dirty || m_auth_dirty) {

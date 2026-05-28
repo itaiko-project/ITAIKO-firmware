@@ -24,7 +24,7 @@ const tusb_desc_device_t keyboard_desc_device = {
 enum {
     USBD_ITF_CDC,
     USBD_ITF_CDC_DATA,
-    USBD_ITF_HID,
+    USBD_ITF_HID,                                                                                                                           
     USBD_ITF_MAX,
 };
 
