@@ -5,6 +5,7 @@
 #include "usb/device/hid/ps3_driver.h"
 #include "usb/device/hid/ps4_auth.h"
 #include "usb/device_driver.h"
+#include "utils/BootModeSelect.h"
 #include "utils/InputReport.h"
 #include "utils/InputState.h"
 #include "utils/Menu.h"
@@ -188,6 +189,23 @@ int main() {
     g_settings_store = std::make_shared<Utils::SettingsStore>();
     auto settings_store = g_settings_store;
 
+    // Headless boot mode select: if a recognized button is held during boot,
+    // switch USB mode and confirm via LED pattern. Persisted to flash later,
+    // once core1 has installed the multicore_lockout victim handler.
+    //
+    // Drives the Waveshare RP2040-Zero onboard WS2812 (GPIO 16, single LED).
+    // This is independent of the main LED strip config (which targets an
+    // external strip on GPIO 15 for boards that have one).
+    const Utils::BootModeSelect::LedConfig boot_led_config = {
+        .pin = 16,
+        .count = 1,
+        .brightness = 64,
+        .is_rgbw = false,
+        .reversed = false,
+    };
+    const bool boot_mode_changed =
+        Utils::BootModeSelect::run(*settings_store, Config::Default::controller_config, boot_led_config);
+
     // Create drum config with ADC channels from settings
     auto drum_config = Config::Default::drum_config;
     drum_config.adc_channels = settings_store->getAdcChannels();
@@ -301,6 +319,11 @@ int main() {
         settings_store->getPs3Mac(ps3_mac);
     }
     hid_ps3_set_mac(ps3_mac);
+
+    // Persist any boot-time mode change now that core1's lockout victim is ready.
+    if (boot_mode_changed) {
+        settings_store->store();
+    }
 
     usbd_driver_init(mode);
     usbd_driver_set_player_led_cb([](usb_player_led_t player_led) {
