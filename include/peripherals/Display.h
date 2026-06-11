@@ -33,6 +33,7 @@ class Display {
         Splash,
         Idle,
         Menu,
+        MacroRecord,
     };
 
     Config m_config;
@@ -58,9 +59,12 @@ class Display {
 
     std::shared_ptr<Utils::SettingsStore> m_settings_store;
 
+    uint16_t m_macro_event_count{0};
+
     bool hasActivity(const Utils::InputState &state);
     void drawIdleScreen();
     void drawMenuScreen();
+    void drawMacroRecordScreen();
 
   public:
     Display(const Config &config, std::shared_ptr<Utils::SettingsStore> settings_store);
@@ -74,6 +78,7 @@ class Display {
 
     void showIdle();
     void showMenu();
+    void showMacroRecord(uint16_t event_count);
 
     void update();
     void drawSplashScreen();

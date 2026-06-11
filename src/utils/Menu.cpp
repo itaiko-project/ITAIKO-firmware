@@ -13,6 +13,7 @@ const std::map<Menu::Page, const Menu::Descriptor> Menu::descriptors = {
        {"Drum", Menu::Descriptor::Action::GotoPageDrum},          //
        {"Led", Menu::Descriptor::Action::GotoPageLed},            //
        {"Reset", Menu::Descriptor::Action::GotoPageReset},        //
+       {"Macro", Menu::Descriptor::Action::GotoPageClearMacro},   //
        {"USB Flash", Menu::Descriptor::Action::GotoPageBootsel},  //
        {"Version", Menu::Descriptor::Action::GotoPageVersion},     //
        {"PS4 Key", Menu::Descriptor::Action::GotoPagePS4Auth},    //
@@ -232,6 +233,13 @@ const std::map<Menu::Page, const Menu::Descriptor> Menu::descriptors = {
        {"Yes", Menu::Descriptor::Action::DoReset}},  //
       0}},                                           //
 
+    {Menu::Page::ClearMacro,                              //
+     {Menu::Descriptor::Type::Menu,                       //
+      "Clear Macro?",                                     //
+      {{"No", Menu::Descriptor::Action::GotoParent},      //
+       {"Yes", Menu::Descriptor::Action::DoClearMacro}},  //
+      0}},                                                //
+
     {Menu::Page::Bootsel,                                         //
      {Menu::Descriptor::Type::Menu,                               //
       "Reboot to Flash Mode",                                     //
@@ -310,7 +318,8 @@ void Menu::Buttons::update(const InputState::Controller &controller_state) {
 
 bool Menu::Buttons::getPressed(Id id) const { return m_states.at(id).pressed; }
 
-Menu::Menu(std::shared_ptr<SettingsStore> settings_store) : m_store(std::move(settings_store)) {};
+Menu::Menu(std::shared_ptr<SettingsStore> settings_store, std::function<void()> clear_macro)
+    : m_store(std::move(settings_store)), m_clear_macro(std::move(clear_macro)) {};
 
 void Menu::activate() {
     m_state_stack = std::stack<State>({{.page = Page::Main, .selected_value = 0, .original_value = 0}});
@@ -369,6 +378,7 @@ uint16_t Menu::getCurrentValue(Menu::Page page) {
     case Page::DrumCutoffThresholds:
     case Page::Led:
     case Page::Reset:
+    case Page::ClearMacro:
     case Page::Bootsel:
     case Page::BootselMsg:
     case Page::Version:
@@ -505,6 +515,7 @@ void Menu::gotoParent(bool do_restore) {
         case Page::DrumCutoffThresholds:
         case Page::Led:
         case Page::Reset:
+        case Page::ClearMacro:
         case Page::Bootsel:
         case Page::BootselMsg:
         case Page::Version:
@@ -548,6 +559,9 @@ void Menu::performAction(Descriptor::Action action, uint16_t value) {
         break;
     case Descriptor::Action::GotoPageReset:
         gotoPage(Page::Reset);
+        break;
+    case Descriptor::Action::GotoPageClearMacro:
+        gotoPage(Page::ClearMacro);
         break;
     case Descriptor::Action::GotoPageBootsel:
         gotoPage(Page::Bootsel);
@@ -723,6 +737,12 @@ void Menu::performAction(Descriptor::Action action, uint16_t value) {
         break;
     case Descriptor::Action::DoReset:
         m_store->reset();
+        break;
+    case Descriptor::Action::DoClearMacro:
+        if (m_clear_macro) {
+            m_clear_macro();
+        }
+        gotoParent(false);
         break;
     case Descriptor::Action::DoRebootToBootsel:
         m_store->scheduleReboot(true);

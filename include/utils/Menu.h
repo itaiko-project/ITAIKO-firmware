@@ -4,6 +4,7 @@
 #include "utils/InputState.h"
 #include "utils/SettingsStore.h"
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <stack>
@@ -21,6 +22,7 @@ class Menu {
         Drum,
         Led,
         Reset,
+        ClearMacro,
         Bootsel,
 
         DrumDebounceDelay,
@@ -84,6 +86,7 @@ class Menu {
             GotoPageDrum,
             GotoPageLed,
             GotoPageReset,
+            GotoPageClearMacro,
             GotoPageBootsel,
 
             GotoPageDrumDebounceDelay,
@@ -148,6 +151,7 @@ class Menu {
             SetLedEnablePlayerColor,
 
             DoReset,
+            DoClearMacro,
             DoRebootToBootsel,
         };
 
@@ -188,6 +192,7 @@ class Menu {
     };
 
     std::shared_ptr<SettingsStore> m_store;
+    std::function<void()> m_clear_macro;
     Buttons m_buttons;
     bool m_active{false};
 
@@ -200,7 +205,7 @@ class Menu {
     void performAction(Descriptor::Action action, uint16_t value);
 
   public:
-    Menu(std::shared_ptr<SettingsStore> settings_store);
+    Menu(std::shared_ptr<SettingsStore> settings_store, std::function<void()> clear_macro = {});
 
     void activate();
     void update(const InputState::Controller &controller_state);

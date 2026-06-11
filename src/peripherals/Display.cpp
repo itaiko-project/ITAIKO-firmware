@@ -110,6 +110,11 @@ void Display::setMenuState(const Utils::Menu::State &menu_state) { m_menu_state 
 
 void Display::showIdle() { m_state = State::Idle; }
 void Display::showMenu() { m_state = State::Menu; }
+void Display::showMacroRecord(uint16_t event_count) {
+    m_state = State::MacroRecord;
+    m_macro_event_count = event_count;
+    m_screen_off = false;
+}
 
 void Display::drawIdleScreen() {
 #ifndef NO_SCREEN
@@ -146,6 +151,25 @@ void Display::drawIdleScreen() {
 #endif
 }
 
+
+void Display::drawMacroRecordScreen() {
+#ifndef NO_SCREEN
+    // Header
+    ssd1306_draw_string(&m_display, 0, 0, 1, "Macro recording");
+    ssd1306_draw_line(&m_display, 0, 10, 128, 10);
+
+    // Blinking "REC" indicator (~1.5Hz)
+    const bool blink_on = (to_ms_since_boot(get_absolute_time()) / 350) % 2 == 0;
+    if (blink_on) {
+        ssd1306_draw_string(&m_display, 18, 22, 3, "REC");
+    }
+
+    // Event count + stop hint
+    const std::string count_str = std::to_string(m_macro_event_count) + " events";
+    ssd1306_draw_string(&m_display, (127 - (count_str.length() * 6)) / 2, 48, 1, count_str.c_str());
+    ssd1306_draw_string(&m_display, 0, 56, 1, "Hold L + R to stop");
+#endif
+}
 
 void Display::drawSplashScreen() {
 #ifndef NO_SCREEN
@@ -290,6 +314,9 @@ void Display::update() {
         break;
     case State::Menu:
         drawMenuScreen();
+        break;
+    case State::MacroRecord:
+        drawMacroRecordScreen();
         break;
     }
 

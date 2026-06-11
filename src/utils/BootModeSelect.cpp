@@ -1,13 +1,12 @@
 #include "utils/BootModeSelect.h"
 
-#include "hardware/gpio.h"
-#include "pico/time.h"
-#include "pio_ws2812/ws2812.h"
+#include "utils/BootLed.h"
 
-#include <algorithm>
+#include "pico/time.h"
+
 #include <array>
-#include <cmath>
 #include <cstdint>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -102,81 +101,12 @@ const Mapping *find_mapping(Held h) {
     return nullptr;
 }
 
-// HSV -> RGB (h in [0,360), s/v in [0,1])
-Color hsv(float h, float s, float v) {
-    float c = v * s;
-    float hh = h / 60.0f;
-    float x = c * (1.0f - std::fabs(std::fmod(hh, 2.0f) - 1.0f));
-    float r1 = 0, g1 = 0, b1 = 0;
-    if (hh < 1) { r1 = c; g1 = x; }
-    else if (hh < 2) { r1 = x; g1 = c; }
-    else if (hh < 3) { g1 = c; b1 = x; }
-    else if (hh < 4) { g1 = x; b1 = c; }
-    else if (hh < 5) { r1 = x; b1 = c; }
-    else { r1 = c; b1 = x; }
-    float m = v - c;
-    return Color{
-        static_cast<uint8_t>((r1 + m) * 255.0f),
-        static_cast<uint8_t>((g1 + m) * 255.0f),
-        static_cast<uint8_t>((b1 + m) * 255.0f),
-    };
-}
-
-class LedDriver {
-  public:
-    LedDriver(const LedConfig &cfg) : m_cfg(cfg) {
-        ws2812_init(pio0, m_cfg.pin, m_cfg.is_rgbw);
-        // ws2812_init -> ws2812_program_init already calls pio_gpio_init and
-        // sets pin direction. Nothing else needed before sending frames.
-        m_frame.assign(m_cfg.count, 0);
-        // Latch reset before first frame (WS2812 needs ~50us low to start a new packet).
-        sleep_us(300);
-    }
-
-    ~LedDriver() {
-        std::fill(m_frame.begin(), m_frame.end(), 0u);
-        ws2812_put_frame(pio0, m_frame.data(), m_frame.size());
-        while (!pio_sm_is_tx_fifo_empty(pio0, 0)) {}
-        sleep_us(350);
-        gpio_set_function(m_cfg.pin, GPIO_FUNC_SIO);
-        gpio_set_dir(m_cfg.pin, GPIO_IN);
-        gpio_pull_up(m_cfg.pin);
-    }
-
-    LedDriver(const LedDriver &) = delete;
-    LedDriver &operator=(const LedDriver &) = delete;
-
-    void fill(Color c) {
-        const uint32_t px = ws2812_rgb_to_gamma_corrected_u32pixel(scale(c.r), scale(c.g), scale(c.b));
-        std::fill(m_frame.begin(), m_frame.end(), px);
-        ws2812_put_frame(pio0, m_frame.data(), m_frame.size());
-    }
-
-    void rainbow_frame(float phase) {
-        for (size_t i = 0; i < m_cfg.count; ++i) {
-            const float h = std::fmod(phase + 360.0f * static_cast<float>(i) / static_cast<float>(m_cfg.count), 360.0f);
-            const Color c = hsv(h, 1.0f, 1.0f);
-            const size_t idx = m_cfg.reversed ? (m_cfg.count - 1 - i) : i;
-            m_frame[idx] = ws2812_rgb_to_gamma_corrected_u32pixel(scale(c.r), scale(c.g), scale(c.b));
-        }
-        ws2812_put_frame(pio0, m_frame.data(), m_frame.size());
-    }
-
-  private:
-    uint8_t scale(uint8_t v) const {
-        return static_cast<uint8_t>((static_cast<uint32_t>(v) * m_cfg.brightness) / 255u);
-    }
-
-    LedConfig m_cfg;
-    std::vector<uint32_t> m_frame;
-};
-
-void play_pattern(LedDriver &led, const Pattern &p) {
+void play_pattern(BootLed &led, const Pattern &p) {
     if (p.kind == PatternKind::Steps) {
         for (const auto &step : p.steps) {
-            led.fill(step.color);
+            led.fill(step.color.r, step.color.g, step.color.b);
             sleep_ms(step.on_ms);
-            led.fill({0, 0, 0});
+            led.fill(0, 0, 0);
             if (step.off_ms > 0) sleep_ms(step.off_ms);
         }
     } else {
@@ -184,7 +114,7 @@ void play_pattern(LedDriver &led, const Pattern &p) {
         const uint16_t frames = p.sweep_ms / frame_ms;
         for (uint16_t f = 0; f < frames; ++f) {
             const float phase = 360.0f * static_cast<float>(f) / static_cast<float>(frames);
-            led.rainbow_frame(phase);
+            led.rainbowFrame(phase);
             sleep_ms(frame_ms);
         }
     }
@@ -237,7 +167,7 @@ bool run(SettingsStore &settings_store,
     }
 
     {
-        LedDriver led(led_config);
+        BootLed led(led_config);
         play_pattern(led, m->pattern);
     }
 

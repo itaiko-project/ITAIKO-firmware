@@ -2,19 +2,15 @@
 #define UTILS_BOOTMODESELECT_H_
 
 #include "peripherals/Controller.h"
+#include "utils/BootLed.h"
 #include "utils/SettingsStore.h"
 
 #include <cstdint>
 
 namespace Doncon::Utils::BootModeSelect {
 
-struct LedConfig {
-    uint8_t pin;        // GPIO driving WS2812 data line
-    uint16_t count;     // number of LEDs in the chain
-    uint8_t brightness; // 0-255 applied to all colors during boot pattern
-    bool is_rgbw;       // true for SK6812 RGBW, false for standard WS2812
-    bool reversed;      // reverse LED ordering (matches StatusLed::Config)
-};
+// Boot confirmation reuses the shared onboard-LED driver.
+using LedConfig = BootLed::Config;
 
 // Polls controller buttons at startup. If a recognized button is held for
 // `hold_ms`, switches the persisted USB mode and plays a confirmation pattern

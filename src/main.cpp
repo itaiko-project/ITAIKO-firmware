@@ -5,9 +5,12 @@
 #include "usb/device/hid/ps3_driver.h"
 #include "usb/device/hid/ps4_auth.h"
 #include "usb/device_driver.h"
+#include "utils/BootLed.h"
+#include "utils/BootMacro.h"
 #include "utils/BootModeSelect.h"
 #include "utils/InputReport.h"
 #include "utils/InputState.h"
+#include "utils/MacroStore.h"
 #include "utils/Menu.h"
 #include "utils/PS4AuthProvider.h"
 #include "utils/SerialConfig.h"
@@ -24,10 +27,12 @@
 #include <array>
 #include <atomic>
 #include <cstdio>
+#include <functional>
 #include <cstring>
 #include <memory>
 #include <string>
 #include <variant>
+#include <vector>
 
 using namespace Doncon;
 
@@ -56,6 +61,7 @@ enum class ControlCommand : uint8_t {
     SetLedEnablePlayerColor,
     EnterMenu,
     ExitMenu,
+    ShowMacroRecord,
 };
 
 struct ControlMessage {
@@ -65,8 +71,96 @@ struct ControlMessage {
         usb_player_led_t player_led;
         uint8_t led_brightness;
         bool led_enable_player_color;
+        uint16_t macro_event_count;
     } data;
 };
+
+// Macro record/replay packs every controller input except the drum pads. See
+// MacroStore::Button. L/R are recorded, but a 600ms L+R hold ends recording.
+uint16_t packMacroButtons(const Utils::InputState::Controller &c) {
+    uint16_t b = 0;
+    if (c.buttons.north) b |= Utils::MacroStore::BTN_NORTH;
+    if (c.buttons.east) b |= Utils::MacroStore::BTN_EAST;
+    if (c.buttons.south) b |= Utils::MacroStore::BTN_SOUTH;
+    if (c.buttons.west) b |= Utils::MacroStore::BTN_WEST;
+    if (c.buttons.start) b |= Utils::MacroStore::BTN_START;
+    if (c.buttons.select) b |= Utils::MacroStore::BTN_SELECT;
+    if (c.buttons.home) b |= Utils::MacroStore::BTN_HOME;
+    if (c.buttons.share) b |= Utils::MacroStore::BTN_SHARE;
+    if (c.dpad.up) b |= Utils::MacroStore::BTN_DPAD_UP;
+    if (c.dpad.down) b |= Utils::MacroStore::BTN_DPAD_DOWN;
+    if (c.dpad.left) b |= Utils::MacroStore::BTN_DPAD_LEFT;
+    if (c.dpad.right) b |= Utils::MacroStore::BTN_DPAD_RIGHT;
+    if (c.buttons.l) b |= Utils::MacroStore::BTN_L;
+    if (c.buttons.r) b |= Utils::MacroStore::BTN_R;
+    return b;
+}
+
+void applyMacroButtons(uint16_t b, Utils::InputState::Controller &c) {
+    c.buttons.north = (b & Utils::MacroStore::BTN_NORTH) != 0;
+    c.buttons.east = (b & Utils::MacroStore::BTN_EAST) != 0;
+    c.buttons.south = (b & Utils::MacroStore::BTN_SOUTH) != 0;
+    c.buttons.west = (b & Utils::MacroStore::BTN_WEST) != 0;
+    c.buttons.start = (b & Utils::MacroStore::BTN_START) != 0;
+    c.buttons.select = (b & Utils::MacroStore::BTN_SELECT) != 0;
+    c.buttons.home = (b & Utils::MacroStore::BTN_HOME) != 0;
+    c.buttons.share = (b & Utils::MacroStore::BTN_SHARE) != 0;
+    c.dpad.up = (b & Utils::MacroStore::BTN_DPAD_UP) != 0;
+    c.dpad.down = (b & Utils::MacroStore::BTN_DPAD_DOWN) != 0;
+    c.dpad.left = (b & Utils::MacroStore::BTN_DPAD_LEFT) != 0;
+    c.dpad.right = (b & Utils::MacroStore::BTN_DPAD_RIGHT) != 0;
+    c.buttons.l = (b & Utils::MacroStore::BTN_L) != 0;
+    c.buttons.r = (b & Utils::MacroStore::BTN_R) != 0;
+}
+
+// Replays a recorded macro once, keeping the USB device alive throughout so the
+// host stays enumerated and registers button holds. Flashes the onboard LED
+// green while playing. `interrupted` is polled to allow aborting via a real
+// button press. Blocks until done or aborted.
+void replayMacro(const std::vector<Utils::MacroStore::Event> &events, Utils::InputReport &input_report, usb_mode_t mode,
+                 const Utils::BootLed::Config &led_config, const std::function<bool()> &interrupted) {
+    Utils::InputState state;
+    Utils::BootLed led(led_config);
+    bool led_on = false;
+    bool abort = false;
+
+    const auto pump = [&](uint32_t duration_ms) {
+        const uint32_t until = to_ms_since_boot(get_absolute_time()) + duration_ms;
+        do {
+            const uint32_t now = to_ms_since_boot(get_absolute_time());
+            const bool on = (now / 250) % 2 == 0; // ~2Hz green flash
+            if (on != led_on) {
+                led_on = on;
+                led.fill(0, on ? 255 : 0, 0);
+            }
+            usbd_driver_send_report(input_report.getReport(state, mode));
+            usbd_driver_task();
+            if (interrupted && interrupted()) {
+                abort = true;
+                return;
+            }
+            sleep_ms(1);
+        } while (to_ms_since_boot(get_absolute_time()) < until);
+    };
+
+    // Warmup so USB enumeration completes before the first injected press.
+    pump(750);
+
+    for (const auto &ev : events) {
+        if (abort) break;
+        pump(ev.delta_ms);
+        applyMacroButtons(ev.buttons, state.controller);
+    }
+
+    if (!abort) {
+        pump(100); // hold the final state briefly
+    }
+
+    // Always release everything on the way out.
+    state.releaseAll();
+    usbd_driver_send_report(input_report.getReport(state, mode));
+    usbd_driver_task();
+}
 
 void core1_task() {
     multicore_lockout_victim_init();
@@ -144,6 +238,9 @@ void core1_task() {
             case ControlCommand::ExitMenu:
                 display.showIdle();
                 break;
+            case ControlCommand::ShowMacroRecord:
+                display.showMacroRecord(control_msg.data.macro_event_count);
+                break;
             }
         }
         if (queue_try_remove(&menu_display_queue, &menu_display_msg)) {
@@ -205,6 +302,16 @@ int main() {
     };
     const bool boot_mode_changed =
         Utils::BootModeSelect::run(*settings_store, Config::Default::controller_config, boot_led_config);
+
+    // Headless macro feature: holding L+R at boot either clears an existing
+    // macro or arms recording of a new one. With no hotkey, a stored macro is
+    // replayed once before the main loop. Flash writes are deferred until core1
+    // has installed its multicore_lockout victim handler.
+    Utils::MacroStore macro_store;
+    const bool macro_hotkey = Utils::BootMacro::check(Config::Default::controller_config);
+    const bool macro_clear_requested = macro_hotkey && macro_store.hasMacro();
+    const bool macro_arm_recording = macro_hotkey && !macro_store.hasMacro();
+    const bool macro_replay = !macro_hotkey && macro_store.hasMacro();
 
     // Create drum config with ADC channels from settings
     auto drum_config = Config::Default::drum_config;
@@ -280,7 +387,7 @@ int main() {
         drum.setAdcChannels(settings_store->getAdcChannels());
     };
 
-    Utils::Menu menu(settings_store);
+    Utils::Menu menu(settings_store, [&macro_store]() { macro_store.clear(); });
     Utils::SerialConfig serial_config(*settings_store, readSettings);
 
     std::array<uint8_t, Utils::PS4AuthProvider::SIGNATURE_LENGTH> auth_challenge_response{};
@@ -325,6 +432,20 @@ int main() {
         settings_store->store();
     }
 
+    // Clear the stored macro now that flash writes are safe (core1 lockout ready).
+    if (macro_clear_requested) {
+        macro_store.clear();
+        // Confirm with three quick red blinks on the onboard LED (blocking is
+        // fine here, before the main loop / USB traffic).
+        Utils::BootLed led(boot_led_config);
+        for (int i = 0; i < 3; ++i) {
+            led.fill(255, 0, 0);
+            sleep_ms(120);
+            led.fill(0, 0, 0);
+            sleep_ms(120);
+        }
+    }
+
     usbd_driver_init(mode);
     usbd_driver_set_player_led_cb([](usb_player_led_t player_led) {
         const auto ctrl_message =
@@ -333,6 +454,41 @@ int main() {
     });
 
     readSettings();
+
+    // Replay a stored macro once at startup (blocks until finished or aborted
+    // by a real button press). Reads live controller input for the abort check.
+    if (macro_replay) {
+        const auto interrupted = [&]() -> bool {
+            Utils::InputState s;
+            if (controller) {
+                controller->updateInputState(s);
+            } else {
+                queue_try_remove(&controller_state_queue, &s.controller);
+            }
+            const auto &b = s.controller.buttons;
+            const auto &d = s.controller.dpad;
+            return b.north || b.east || b.south || b.west || b.start || b.select || b.home || b.share || b.l || b.r ||
+                   d.up || d.down || d.left || d.right;
+        };
+        replayMacro(macro_store.events(), input_report, mode, boot_led_config, interrupted);
+        input_state.releaseAll();
+    }
+
+    // Live macro recording state. Only armed when L+R were held at boot and no
+    // macro existed yet. WaitRelease ensures the boot-hold of L+R is released
+    // before capture begins; recording stops on a fresh L+R hold.
+    enum class MacroRecState : uint8_t { Idle, WaitRelease, Recording };
+    MacroRecState macro_rec = macro_arm_recording ? MacroRecState::WaitRelease : MacroRecState::Idle;
+    std::vector<Utils::MacroStore::Event> macro_events;
+    uint16_t macro_last_buttons = 0;
+    uint32_t macro_last_event_time = 0;
+    uint32_t macro_stop_hold_since = 0;
+    bool macro_stop_hold_active = false;
+    static const uint32_t macro_stop_hold_ms = 600;
+    // Onboard-LED "recording" blink (same LED the mode switcher flashes), so
+    // OLED-less boards still get feedback. Driven non-blocking from the loop.
+    std::unique_ptr<Utils::BootLed> macro_led;
+    bool macro_led_on = false;
 
     while (true) {
         drum.updateInputState(input_state);
@@ -348,6 +504,72 @@ int main() {
             queue_try_add(&controller_state_queue, &input_state.controller);
         } else {
             queue_try_remove(&controller_state_queue, &input_state.controller);
+        }
+
+        // Macro recording: capture face-button transitions with timing. Runs on
+        // the live controller input (only ever armed for InternalGpio builds).
+        if (macro_rec != MacroRecState::Idle) {
+            const uint32_t now = to_ms_since_boot(get_absolute_time());
+            const bool lr = input_state.controller.buttons.l && input_state.controller.buttons.r;
+
+            if (macro_rec == MacroRecState::WaitRelease) {
+                if (!input_state.controller.buttons.l && !input_state.controller.buttons.r) {
+                    macro_rec = MacroRecState::Recording;
+                    macro_last_buttons = 0;
+                    macro_last_event_time = now;
+                    macro_stop_hold_active = false;
+                    macro_led = std::make_unique<Utils::BootLed>(boot_led_config);
+                    macro_led_on = false;
+                    const ControlMessage msg{.command = ControlCommand::ShowMacroRecord,
+                                             .data = {.macro_event_count = 0}};
+                    queue_try_add(&control_queue, &msg);
+                }
+            } else if (lr) { // Recording: L+R held -> candidate stop
+                if (!macro_stop_hold_active) {
+                    macro_stop_hold_active = true;
+                    macro_stop_hold_since = now;
+                } else if ((now - macro_stop_hold_since) >= macro_stop_hold_ms) {
+                    macro_store.save(macro_events);
+                    macro_rec = MacroRecState::Idle;
+                    macro_led.reset(); // turn LED off + release the pin
+                    const ControlMessage msg{.command = ControlCommand::ExitMenu, .data = {}};
+                    queue_add_blocking(&control_queue, &msg);
+                }
+            } else { // Recording: capture transitions
+                macro_stop_hold_active = false;
+                const uint16_t buttons = packMacroButtons(input_state.controller);
+                if (buttons != macro_last_buttons && macro_events.size() < Utils::MacroStore::MAX_EVENTS) {
+                    uint32_t delta = now - macro_last_event_time;
+                    // Split gaps longer than a uint16 into no-change filler events.
+                    while (delta > 0xFFFF && macro_events.size() < Utils::MacroStore::MAX_EVENTS) {
+                        macro_events.push_back({0xFFFF, macro_last_buttons});
+                        delta -= 0xFFFF;
+                    }
+                    macro_events.push_back({static_cast<uint16_t>(delta), buttons});
+                    macro_last_buttons = buttons;
+                    macro_last_event_time = now;
+                    const ControlMessage msg{
+                        .command = ControlCommand::ShowMacroRecord,
+                        .data = {.macro_event_count = static_cast<uint16_t>(macro_events.size())}};
+                    queue_try_add(&control_queue, &msg);
+                }
+            }
+
+            // Non-blocking "recording" blink on the onboard LED (~1.5Hz).
+            if (macro_led && macro_rec == MacroRecState::Recording) {
+                const bool on = (now / 330) % 2 == 0;
+                if (on != macro_led_on) {
+                    macro_led_on = on;
+                    macro_led->fill(on ? 255 : 0, 0, 0);
+                }
+            }
+
+            // Until the boot-time L+R hold is released, keep it out of the USB
+            // report. Once recording, L/R pass through (they are recorded too).
+            if (macro_rec == MacroRecState::WaitRelease) {
+                input_state.controller.buttons.l = false;
+                input_state.controller.buttons.r = false;
+            }
         }
 
         const auto drum_message = input_state.drum;
@@ -367,7 +589,7 @@ int main() {
             readSettings();
             input_state.releaseAll();
 
-        } else if (checkHotkey()) {
+        } else if (macro_rec == MacroRecState::Idle && checkHotkey()) {
             menu.activate();
 
             ControlMessage ctrl_message{.command = ControlCommand::EnterMenu, .data = {}};

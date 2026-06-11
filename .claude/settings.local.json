@@ -8,5 +8,9 @@
     ],
     "deny": [],
     "ask": []
-  }
+  },
+  "enabledMcpjsonServers": [
+    "firefox-devtools",
+    "lightpanda"
+  ]
 }
