@@ -308,7 +308,8 @@ int main() {
     // replayed once before the main loop. Flash writes are deferred until core1
     // has installed its multicore_lockout victim handler.
     Utils::MacroStore macro_store;
-    const bool macro_hotkey = Utils::BootMacro::check(Config::Default::controller_config);
+    uint32_t macro_arm_press_time = 0;
+    const bool macro_hotkey = Utils::BootMacro::check(Config::Default::controller_config, 300, &macro_arm_press_time);
     const bool macro_clear_requested = macro_hotkey && macro_store.hasMacro();
     const bool macro_arm_recording = macro_hotkey && !macro_store.hasMacro();
     const bool macro_replay = !macro_hotkey && macro_store.hasMacro();
@@ -516,7 +517,9 @@ int main() {
                 if (!input_state.controller.buttons.l && !input_state.controller.buttons.r) {
                     macro_rec = MacroRecState::Recording;
                     macro_last_buttons = 0;
-                    macro_last_event_time = now;
+                    // Anchor the clock at when L+R were first pressed (boot), not
+                    // at release, so the first pause includes the hold time.
+                    macro_last_event_time = macro_arm_press_time;
                     macro_stop_hold_active = false;
                     macro_led = std::make_unique<Utils::BootLed>(boot_led_config);
                     macro_led_on = false;

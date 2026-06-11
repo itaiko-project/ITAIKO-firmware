@@ -8,7 +8,7 @@
 
 namespace Doncon::Utils::BootMacro {
 
-bool check(const Peripherals::Controller::Config &controller_config, unsigned hold_ms) {
+bool check(const Peripherals::Controller::Config &controller_config, unsigned hold_ms, uint32_t *press_start_ms) {
     if (!std::holds_alternative<Peripherals::Controller::Config::InternalGpio>(controller_config.gpio_config)) {
         return false;
     }
@@ -30,6 +30,9 @@ bool check(const Peripherals::Controller::Config &controller_config, unsigned ho
         sleep_ms(10);
     }
 
+    if (held_whole_time && press_start_ms != nullptr) {
+        *press_start_ms = start; // L+R were held from `start`
+    }
     return held_whole_time;
 }
 

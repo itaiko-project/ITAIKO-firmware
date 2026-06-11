@@ -141,10 +141,12 @@ static uint8_t usio_sram[USIO_SRAM_PAGE_COUNT][USIO_SRAM_PAGE_SIZE];
 // Layout (from end of flash, going backward):
 //   [last sector]                        SettingsStore main config (4 KB)
 //   [prev sector]                        SettingsStore PS4 auth    (4 KB)
+//   [prev sector]                        MacroStore macro          (4 KB)
 //   [USIO_FLASH_SECTORS sectors before]  USIO SRAM region          (20 KB)
 //
-// We sit *before* SettingsStore's reserved area so we can never collide with
-// existing user settings. The region is one header sector + four data sectors:
+// We sit *before* the reserved tail (settings + auth + macro) so we can never
+// collide with existing user settings. The region is one header sector + four
+// data sectors:
 // the header sector holds magic/version/CRC; the four data sectors mirror
 // usio_sram[] verbatim.
 //
@@ -162,10 +164,15 @@ enum {
     USIO_FLASH_DEBOUNCE_MS = 750,
 };
 
-// Sit before SettingsStore's two reserved sectors (main + auth = 8 KB).
-#define USIO_FLASH_RESERVED_BY_SETTINGS_STORE (2u * FLASH_SECTOR_SIZE)
-#define USIO_FLASH_OFFSET                                                                                              \
-    (PICO_FLASH_SIZE_BYTES - USIO_FLASH_RESERVED_BY_SETTINGS_STORE - USIO_FLASH_TOTAL_SIZE)
+// Sit before the reserved tail: SettingsStore main + auth and the MacroStore
+// sector (3 sectors = 12 KB). Keep in sync with MacroStore::m_flash_offset
+// (PICO_FLASH_SIZE_BYTES - 3 * FLASH_SECTOR_SIZE).
+#define USIO_FLASH_RESERVED_TAIL (3u * FLASH_SECTOR_SIZE)
+#define USIO_FLASH_OFFSET (PICO_FLASH_SIZE_BYTES - USIO_FLASH_RESERVED_TAIL - USIO_FLASH_TOTAL_SIZE)
+
+// USIO must end at or below the macro sector (the lowest reserved-tail sector).
+_Static_assert(USIO_FLASH_OFFSET + USIO_FLASH_TOTAL_SIZE <= PICO_FLASH_SIZE_BYTES - 3u * FLASH_SECTOR_SIZE,
+               "USIO flash region overlaps the reserved settings/auth/macro tail");
 
 #define USIO_FLASH_MAGIC 0x4F495355u // 'USIO'
 #define USIO_FLASH_VERSION 1u

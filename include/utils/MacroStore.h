@@ -12,8 +12,14 @@ namespace Doncon::Utils {
 // transitions) in a dedicated flash sector. Used by the boot-time macro
 // record/replay feature for unmanned arcade auto-launch.
 //
-// Flash layout (from top of flash, see SettingsStore):
-//   [settings sector][auth sector][macro sector]  <- this class owns the last
+// Flash layout (from end of flash, going backward):
+//   [last sector]  SettingsStore main config
+//   [prev sector]  SettingsStore PS4 auth
+//   [prev sector]  MacroStore macro            <- this class owns this sector
+//   [5 sectors]    USIO SRAM region (see usio_driver.c USIO_FLASH_RESERVED_TAIL)
+//
+// m_flash_offset must stay equal to PICO_FLASH_SIZE_BYTES - 3*FLASH_SECTOR_SIZE
+// so it lands between the auth sector and the USIO region without overlap.
 class MacroStore {
   public:
     // Every controller input is recorded except the drum pads. A deliberate
