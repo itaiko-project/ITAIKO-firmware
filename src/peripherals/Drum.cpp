@@ -233,12 +233,41 @@ uint16_t Drum::getThreshold(const Id pad_id, const Config::Thresholds &threshold
     return 0;
 }
 
+// Gap (ms) inserted after a buffered re-hit's hold/lockout before it is replayed,
+// so the host sees a clean release edge between paced hits.
+static constexpr uint16_t kBufferDelayMs = 5;
+
 void Drum::updateDigitalInputState(Utils::InputState &input_state, const std::map<Drum::Id, int32_t> &raw_values) {
     const uint32_t now = to_ms_since_boot(get_absolute_time());
 
-    // PHASE 0: Maintain existing button states (key timeout logic)
+    // PHASE 0: Maintain existing button states (key timeout logic). Snapshot the
+    // pressed state BEFORE the timeout so PHASE 0b can tell whether a pad was already
+    // released coming into this frame.
+    std::array<bool, 4> was_pressed{};
     for (auto &[id, pad] : m_pads) {
+        was_pressed.at(static_cast<size_t>(id)) = pad.getState();
         pad.updateTimeout(m_config.debounce_delay_ms);
+    }
+
+    // PHASE 0b: Replay buffered re-hits whose release gap has elapsed.
+    // A fast same-pad hit that arrived while the pad was still held / within its own
+    // re-trigger lockout was queued (instead of dropped) so the game still registers
+    // every hit during a roll. Cross-key / same-type echoes are never buffered.
+    //
+    // Only fire in a frame that STARTED with the pad released (was_pressed == false):
+    // that means the previous frame's report already carried the release, so the host
+    // sees a distinct press. Releasing and re-pressing within one frame would hide the
+    // release and merge consecutive hits into one long hold (slow-loop frames).
+    for (auto &[id, pad] : m_pads) {
+        if (pad.hasPending() && now >= pad.getPendingFire() && !was_pressed.at(static_cast<size_t>(id))) {
+            pad.trigger();
+            pad.clearPending();
+            if (id == Id::DON_LEFT || id == Id::DON_RIGHT) {
+                last_don_time = now;
+            } else {
+                last_kat_time = now;
+            }
+        }
     }
 
     // Initialize candidate tracking
@@ -263,22 +292,18 @@ void Drum::updateDigitalInputState(Utils::InputState &input_state, const std::ma
         // Cutoff check: if raw value exceeds cutoff, ignore but block aftershocks
         if (adc_value > cutoff_threshold) {
             pad.setLastTrigger(now);
+            pad.setWasAbove(false);
             continue;
         }
 
-        // Skip if already pressed
-        if (pad.getState()) {
-            continue;
-        }
+        // A strike is the RISING EDGE of the threshold crossing (was below, now above).
+        // The continuation frames of one spike (its multi-sample rising slope) stay
+        // "above" and are ignored, so a single hard hit can't register as several hits.
+        const bool above = (delta > light_threshold);
+        const bool rising_edge = above && !pad.wasAbove();
+        pad.setWasAbove(above);
 
-        // Check if above light threshold
-        if (delta <= light_threshold) {
-            continue;
-        }
-
-        // Per-sensor debounce check
-        const uint32_t time_since_trigger = now - pad.getLastTrigger();
-        if (time_since_trigger <= m_config.key_timeout_ms) {
+        if (!rising_edge) {
             continue;
         }
 
@@ -287,7 +312,8 @@ void Drum::updateDigitalInputState(Utils::InputState &input_state, const std::ma
             m_config.double_trigger_mode != Config::DoubleTriggerMode::Off &&
             delta > static_cast<int32_t>(getThreshold(id, m_config.double_trigger_thresholds));
 
-        // Type-specific debounce and crosstalk checks
+        // Type-specific debounce and crosstalk checks. These reject ghost / echo hits
+        // and are NEVER buffered (replaying crosstalk would create phantom notes).
         const bool is_don = (id == Id::DON_LEFT || id == Id::DON_RIGHT);
         if (is_don) {
             // Crosstalk debounce (never bypassed)
@@ -307,6 +333,25 @@ void Drum::updateDigitalInputState(Utils::InputState &input_state, const std::ma
             if (now - last_kat_time < m_config.kat_debounce && !is_hard_hit) {
                 continue;
             }
+        }
+
+        // Self gate: pad still held, within its own re-trigger lockout, or only just
+        // released THIS frame. The last case matters because triggering now would set
+        // `triggered` back to true in the same loop iteration that released it, so the
+        // release report would never be sent and consecutive hits would merge into one
+        // long hold. Deferring keeps an OFF report between presses. Previously these hits
+        // were dropped (lost roll inputs); with Buffered Input on they are queued and
+        // replayed once the release has been reported, otherwise dropped as before.
+        const uint32_t time_since_trigger = now - pad.getLastTrigger();
+        const bool self_blocked = pad.getState() || was_pressed.at(static_cast<size_t>(id)) ||
+                                  (time_since_trigger <= m_config.key_timeout_ms);
+        if (self_blocked) {
+            if (m_buffered_input && !pad.hasPending()) {
+                const uint16_t gap =
+                    m_config.debounce_delay_ms > m_config.key_timeout_ms ? m_config.debounce_delay_ms : m_config.key_timeout_ms;
+                pad.setPending(pad.getLastTrigger() + gap + kBufferDelayMs);
+            }
+            continue;
         }
 
         // Calculate ratio and mark as candidate
@@ -465,6 +510,15 @@ void Drum::setKatDebounceMs(const uint16_t ms) { m_config.kat_debounce = ms; }
 void Drum::setCrosstalkDebounceMs(const uint16_t ms) { m_config.crosstalk_debounce = ms; }
 
 void Drum::setKeyTimeoutMs(const uint16_t ms) { m_config.key_timeout_ms = ms; }
+
+void Drum::setBufferedInput(const bool enabled) {
+    m_buffered_input = enabled;
+    if (!enabled) {
+        for (auto &[id, pad] : m_pads) {
+            pad.clearPending();
+        }
+    }
+}
 
 void Drum::setTriggerThresholds(const Config::Thresholds &thresholds) { m_config.trigger_thresholds = thresholds; }
 

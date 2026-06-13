@@ -100,6 +100,14 @@ class Drum {
         int32_t m_last_adc_value{0};
 
         bool m_active{false};
+        // Edge tracker: was the delta above the light threshold last frame? A new strike
+        // is only the rising edge (false -> true), so the multi-frame rising slope of one
+        // (hard) hit can't be counted as several hits.
+        bool m_prev_above{false};
+        // One-deep buffered re-hit: a fast same-pad hit blocked only by this pad's own
+        // hold/lockout is queued here and replayed once the release gap elapses.
+        bool m_pending{false};
+        uint32_t m_pending_fire{0};
         std::deque<analog_buffer_entry> m_analog_buffer;
 
       public:
@@ -120,6 +128,17 @@ class Drum {
         void updateTimeout(uint16_t key_timeout);
         uint16_t getAnalog();
         void setAnalog(uint16_t value, uint16_t debounce_delay);
+
+        [[nodiscard]] bool wasAbove() const { return m_prev_above; };
+        void setWasAbove(bool above) { m_prev_above = above; };
+
+        [[nodiscard]] bool hasPending() const { return m_pending; };
+        [[nodiscard]] uint32_t getPendingFire() const { return m_pending_fire; };
+        void setPending(uint32_t fire_time) {
+            m_pending = true;
+            m_pending_fire = fire_time;
+        };
+        void clearPending() { m_pending = false; };
     };
 
     class RollCounter {
@@ -174,6 +193,7 @@ class Drum {
     std::map<Id, Pad> m_pads;
     RollCounter m_roll_counter;
     uint32_t m_global_debounce_time{0};
+    bool m_buffered_input{false}; // 連打 buffered re-emission (fast-roll recovery)
 
     uint32_t last_don_time;
     uint32_t last_kat_time;
@@ -209,6 +229,7 @@ class Drum {
     void setKatDebounceMs(uint16_t ms);
     void setCrosstalkDebounceMs(uint16_t ms);
     void setKeyTimeoutMs(uint16_t ms);
+    void setBufferedInput(bool enabled);
     void setTriggerThresholds(const Config::Thresholds &thresholds);
     void setDoubleTriggerMode(Config::DoubleTriggerMode mode);
     void setDoubleThresholds(const Config::Thresholds &thresholds);

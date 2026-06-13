@@ -1,6 +1,7 @@
 #include "utils/Menu.h"
 
 #include "peripherals/Drum.h"
+#include "utils/RollBoost.h"
 
 namespace Doncon::Utils {
 
@@ -58,7 +59,9 @@ const std::map<Menu::Page, const Menu::Descriptor> Menu::descriptors = {
        {"Debounce", Menu::Descriptor::Action::GotoPageDrumDebounce},             //
        {"Thresholds", Menu::Descriptor::Action::GotoPageDrumTriggerThresholds},  //
        {"Cutoff", Menu::Descriptor::Action::GotoPageDrumCutoffThresholds},       //
-       {"Double Trg", Menu::Descriptor::Action::GotoPageDrumDoubleTrigger}},     //
+       {"Double Trg", Menu::Descriptor::Action::GotoPageDrumDoubleTrigger},      //
+       {"Roll Boost", Menu::Descriptor::Action::GotoPageDrumRollBoost},          //
+       {"Buffered", Menu::Descriptor::Action::GotoPageDrumBufferedInput}},       //
       0}},                                                                       //
 
     {Menu::Page::DrumTriggerThresholds,                                               //
@@ -106,6 +109,18 @@ const std::map<Menu::Page, const Menu::Descriptor> Menu::descriptors = {
       "Key Debounce (ms)",                                 //
       {{"", Menu::Descriptor::Action::SetDrumKeyTimeout}}, //
       UINT8_MAX}},
+
+    {Menu::Page::DrumRollBoost,                          //
+     {Menu::Descriptor::Type::Value,                     //
+      "Roll Boost (ms)",                                 //
+      {{"", Menu::Descriptor::Action::SetDrumRollBoost}}, //
+      RollBoost::kMaxWindowMs}},
+
+    {Menu::Page::DrumBufferedInput,                          //
+     {Menu::Descriptor::Type::Toggle,                        //
+      "Buffered Input",                                      //
+      {{"", Menu::Descriptor::Action::SetDrumBufferedInput}}, //
+      0}},
 
     {Menu::Page::DrumDebounce,                                         //
      {Menu::Descriptor::Type::Menu,                                    //
@@ -331,6 +346,10 @@ uint16_t Menu::getCurrentValue(Menu::Page page) {
         return m_store->getKatDebounceMs();
     case Page::DrumCrosstalkDebounce:
         return m_store->getCrosstalkDebounceMs();
+    case Page::DrumRollBoost:
+        return m_store->getRollBoostMs();
+    case Page::DrumBufferedInput:
+        return static_cast<uint16_t>(m_store->getBufferedInput());
     case Page::DrumDoubleTrigger:
         return static_cast<uint16_t>(m_store->getDoubleTriggerMode());
     case Page::DrumTriggerThresholdKaLeft:
@@ -414,6 +433,12 @@ void Menu::gotoParent(bool do_restore) {
             break;
         case Page::DrumCrosstalkDebounce:
             m_store->setCrosstalkDebounceMs(current_state.original_value);
+            break;
+        case Page::DrumRollBoost:
+            m_store->setRollBoostMs(current_state.original_value);
+            break;
+        case Page::DrumBufferedInput:
+            m_store->setBufferedInput(static_cast<bool>(current_state.original_value));
             break;
         case Page::DrumTriggerThresholdKaLeft: {
             auto thresholds = m_store->getTriggerThresholds();
@@ -567,6 +592,12 @@ void Menu::performAction(Descriptor::Action action, uint16_t value) {
     case Descriptor::Action::GotoPageDrumKeyTimeout:
         gotoPage(Page::DrumKeyTimeout);
         break;
+    case Descriptor::Action::GotoPageDrumRollBoost:
+        gotoPage(Page::DrumRollBoost);
+        break;
+    case Descriptor::Action::GotoPageDrumBufferedInput:
+        gotoPage(Page::DrumBufferedInput);
+        break;
     case Descriptor::Action::GotoPageDrumDebounce:
         gotoPage(Page::DrumDebounce);
         break;
@@ -629,6 +660,12 @@ void Menu::performAction(Descriptor::Action action, uint16_t value) {
         break;
     case Descriptor::Action::SetDrumKeyTimeout:
         m_store->setKeyTimeoutMs(value);
+        break;
+    case Descriptor::Action::SetDrumRollBoost:
+        m_store->setRollBoostMs(value);
+        break;
+    case Descriptor::Action::SetDrumBufferedInput:
+        m_store->setBufferedInput(static_cast<bool>(value));
         break;
     case Descriptor::Action::SetDrumDonDebounce:
         m_store->setDonDebounceMs(value);

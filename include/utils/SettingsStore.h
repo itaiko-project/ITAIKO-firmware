@@ -47,6 +47,8 @@ class SettingsStore {
                 ControllerKeys controller_keys;
                 Peripherals::Drum::Config::AdcChannels adc_channels;
                 uint8_t ps3_mac[6];
+                uint8_t roll_boost_ms;  // 連打增速 window (ms), 0 = off. Appended -> old saves read 0.
+                uint8_t buffered_input; // 1 = buffer & replay fast same-pad re-hits (roll recovery)
             };
             uint8_t raw[m_store_size];
         };
@@ -142,6 +144,12 @@ class SettingsStore {
     void setPs3Mac(const uint8_t mac[6]);
     void getPs3Mac(uint8_t mac[6]) const;
     [[nodiscard]] bool hasPs3Mac() const;
+
+    void setRollBoostMs(uint16_t ms);
+    [[nodiscard]] uint16_t getRollBoostMs() const;
+
+    void setBufferedInput(bool enabled);
+    [[nodiscard]] bool getBufferedInput() const;
 
     void scheduleReboot(bool bootsel = false);
 

@@ -2,6 +2,7 @@
 #define UTILS_INPUTREPORT_H_
 
 #include "utils/InputState.h"
+#include "utils/RollBoost.h"
 
 #include "usb/device/hid/keyboard_driver.h"
 #include "usb/device/hid/ps3_driver.h"
@@ -115,6 +116,8 @@ struct InputReport {
     usio_input_t m_usio_input{};
 
     uint8_t m_ps4_report_counter = 0;
+
+    RollBoost m_roll_boost;
 
     usb_report_t getSwitchReport(const InputState &state);
     usb_report_t getPS3Report(const InputState &state);

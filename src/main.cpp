@@ -273,6 +273,7 @@ int main() {
 
         drum.setCrosstalkDebounceMs(settings_store->getCrosstalkDebounceMs());
         drum.setKeyTimeoutMs(settings_store->getKeyTimeoutMs());
+        drum.setBufferedInput(settings_store->getBufferedInput());
         drum.setTriggerThresholds(settings_store->getTriggerThresholds());
         drum.setDoubleTriggerMode(settings_store->getDoubleTriggerMode());
         drum.setDoubleThresholds(settings_store->getDoubleTriggerThresholds());

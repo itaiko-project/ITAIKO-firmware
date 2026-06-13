@@ -1,5 +1,7 @@
 #include "utils/SettingsStore.h"
 
+#include "utils/RollBoost.h"
+
 #include "GlobalConfiguration.h"
 
 #include "hardware/watchdog.h"
@@ -51,7 +53,9 @@ SettingsStore::SettingsStore()
                      .drum_keys_p2 = Config::Default::drum_keys_p2,
                      .controller_keys = Config::Default::controller_keys,
                      .adc_channels = Config::Default::drum_config.adc_channels,
-                     .ps3_mac = {0, 0, 0, 0, 0, 0}}) {
+                     .ps3_mac = {0, 0, 0, 0, 0, 0},
+                     .roll_boost_ms = 0,
+                     .buffered_input = 0}) {
     uint32_t current_page = m_flash_offset + m_flash_size - m_store_size;
     bool found_valid = false;
     for (size_t i = 0; i < m_store_pages; ++i) {
@@ -275,6 +279,29 @@ bool SettingsStore::hasPs3Mac() const {
     }
     return false;
 }
+
+void SettingsStore::setRollBoostMs(const uint16_t ms) {
+    // Defensive clamp: anything above the supported window is treated as "off",
+    // matching the source firmware's load-time sanity check.
+    const uint8_t clamped = ms > RollBoost::kMaxWindowMs ? 0 : static_cast<uint8_t>(ms);
+    if (m_store_cache.roll_boost_ms != clamped) {
+        m_store_cache.roll_boost_ms = clamped;
+        m_dirty = true;
+    }
+}
+uint16_t SettingsStore::getRollBoostMs() const {
+    const uint8_t v = m_store_cache.roll_boost_ms;
+    return v > RollBoost::kMaxWindowMs ? 0 : v;
+}
+
+void SettingsStore::setBufferedInput(const bool enabled) {
+    const uint8_t v = enabled ? 1 : 0;
+    if (m_store_cache.buffered_input != v) {
+        m_store_cache.buffered_input = v;
+        m_dirty = true;
+    }
+}
+bool SettingsStore::getBufferedInput() const { return m_store_cache.buffered_input != 0; }
 
 void SettingsStore::store() {
     if (m_dirty || m_auth_dirty) {

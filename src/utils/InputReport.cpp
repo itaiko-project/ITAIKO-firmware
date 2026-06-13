@@ -1,6 +1,8 @@
 #include "utils/InputReport.h"
 #include "utils/SettingsStore.h"
 
+#include "pico/time.h"
+
 namespace Doncon::Utils {
 
 namespace {
@@ -269,26 +271,33 @@ usb_report_t InputReport::getUsioReport(const InputState &state) {
 }
 
 usb_report_t InputReport::getReport(const InputState &state, usb_mode_t mode) {
+    // Apply the drumroll boost (連打增速) on a throw-away copy so it only affects the
+    // emitted USB report; the caller's input_state stays natural for LEDs / display /
+    // sensor streaming. 0 = disabled -> pure pass-through.
+    InputState boosted = state;
+    m_roll_boost.process(boosted.drum, to_ms_since_boot(get_absolute_time()),
+                         m_settings_store->getRollBoostMs());
+
     switch (mode) {
     case USB_MODE_SWITCH_TATACON:
-        return getSwitchReport(state);
+        return getSwitchReport(boosted);
     case USB_MODE_DUALSHOCK3:
-        return getPS3Report(state);
+        return getPS3Report(boosted);
     case USB_MODE_PS4_TATACON:
-        return getPS4Report(state);
+        return getPS4Report(boosted);
     case USB_MODE_KEYBOARD_P1:
-        return getKeyboardReport(state, Player::One);
+        return getKeyboardReport(boosted, Player::One);
     case USB_MODE_KEYBOARD_P2:
-        return getKeyboardReport(state, Player::Two);
+        return getKeyboardReport(boosted, Player::Two);
     case USB_MODE_XBOX360:
-        return getXinputDigitalReport(state);
+        return getXinputDigitalReport(boosted);
     case USB_MODE_MIDI:
-        return getMidiReport(state);
+        return getMidiReport(boosted);
     case USB_MODE_USIO_TAIKO:
-        return getUsioReport(state);
+        return getUsioReport(boosted);
     }
 
-    return getUsioReport(state);
+    return getUsioReport(boosted);
 }
 
 } // namespace Doncon::Utils

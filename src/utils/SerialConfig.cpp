@@ -288,14 +288,16 @@ void SerialConfig::handleWriteData(const char *data) {
 }
 
 void SerialConfig::sendAllSettings() {
-    // Send 46 values: 9 hidtaiko-compatible + 5 extended (double trigger) + 4 extended (cutoff thresholds) + 24 extended (key mappings) + 4 extended (ADC channels)
-    for (int i = 0; i < 46; i++) {
+    // Send 48 values: 9 hidtaiko-compatible + 5 extended (double trigger) + 4 extended (cutoff thresholds) + 24 extended (key mappings) + 4 extended (ADC channels) + 1 roll boost + 1 buffered input
+    for (int i = 0; i < 48; i++) {
         uint16_t value = getSettingByKey(i);
         printf("%d:%d\n", i, value);
         stdio_flush();
         //sleep_us(5000); // Small delay between values
     }
     printf("Version:%s\n", FIRMWARE_VERSION);
+    stdio_flush();
+    printf("Edition:%s\n", FIRMWARE_EDITION);
     stdio_flush();
 }
 
@@ -404,6 +406,12 @@ uint16_t SerialConfig::getSettingByKey(int key) {
         return m_settings_store.getAdcChannels().don_right;
     case 45: // ADC Channel Ka Right
         return m_settings_store.getAdcChannels().ka_right;
+
+    case 46: // Roll Boost window (連打增速), ms; 0 = off
+        return m_settings_store.getRollBoostMs();
+
+    case 47: // Buffered Input (fast-roll re-emission); 0 = off, 1 = on
+        return m_settings_store.getBufferedInput() ? 1 : 0;
 
     default:
         return 0;
@@ -662,6 +670,14 @@ void SerialConfig::setSettingByKey(int key, uint16_t value) {
         m_settings_store.setAdcChannels(adc_channels);
         break;
     }
+
+    case 46: // Roll Boost window (連打增速), ms; 0 = off
+        m_settings_store.setRollBoostMs(value);
+        break;
+
+    case 47: // Buffered Input (fast-roll re-emission); 0 = off, 1 = on
+        m_settings_store.setBufferedInput(value != 0);
+        break;
 
     default:
         break;
