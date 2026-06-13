@@ -54,8 +54,8 @@ SettingsStore::SettingsStore()
                      .controller_keys = Config::Default::controller_keys,
                      .adc_channels = Config::Default::drum_config.adc_channels,
                      .ps3_mac = {0, 0, 0, 0, 0, 0},
-                     .roll_boost_ms = 0,
-                     .buffered_input = 0}) {
+                     .roll_boost_ms = 30,
+                     .buffered_input = 1}) {
     uint32_t current_page = m_flash_offset + m_flash_size - m_store_size;
     bool found_valid = false;
     for (size_t i = 0; i < m_store_pages; ++i) {
