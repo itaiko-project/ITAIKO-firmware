@@ -1,5 +1,7 @@
 #include "utils/SerialConfig.h"
 
+#include "utils/Edition.h"
+
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -297,7 +299,7 @@ void SerialConfig::sendAllSettings() {
     }
     printf("Version:%s\n", FIRMWARE_VERSION);
     stdio_flush();
-    printf("Edition:%s\n", FIRMWARE_EDITION);
+    printf("Edition:%s\n", getFirmwareEdition());
     stdio_flush();
 }
 

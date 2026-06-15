@@ -41,21 +41,11 @@ else()
 endif()
 add_compile_definitions(FIRMWARE_VERSION=\"${FIRMWARE_VERSION}\")
 
-# Firmware edition / branding. Default is the stock "iTAIKO" edition.
-# Build the ZhongTaiko edition with either:
-#   cmake -DZHONGTAIKO=ON ..
-# or by setting the FIRMWARE_EDITION environment variable.
+# Firmware edition / branding is detected at runtime, not at build time.
+# Bridge GPIO25 to GND to flag the board as the ZhongTaiko edition; otherwise the
+# stock "iTAIKO" edition is reported. See src/utils/Edition.cpp.
 # The edition string is reported to the web configurator over serial so it can
 # show the matching co-branding (e.g. "ZhongTaiko x iTAIKO").
-option(ZHONGTAIKO "Build the ZhongTaiko edition" OFF)
-if(DEFINED ENV{FIRMWARE_EDITION})
-    set(FIRMWARE_EDITION $ENV{FIRMWARE_EDITION})
-elseif(ZHONGTAIKO)
-    set(FIRMWARE_EDITION "ZhongTaiko")
-else()
-    set(FIRMWARE_EDITION "iTAIKO")
-endif()
-add_compile_definitions(FIRMWARE_EDITION=\"${FIRMWARE_EDITION}\")
 
 add_compile_options(-Wall -Wextra -Werror)
 
