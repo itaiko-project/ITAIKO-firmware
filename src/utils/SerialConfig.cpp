@@ -172,6 +172,27 @@ void SerialConfig::handleCommand(int command_value) {
         stdio_flush();
         break;
 
+    case Command::QueryEdition:
+        printf("Edition:%s\n", getFirmwareEdition());
+        stdio_flush();
+        break;
+
+    case Command::EnableZhongTaiko:
+    case Command::ClearZhongTaiko: {
+        const bool enabled = command_value == static_cast<int>(Command::EnableZhongTaiko);
+        if (std::strcmp(s_serial_buf, enabled ? "6001" : "6002") != 0) {
+            break;
+        }
+        uint32_t flash_id = 0;
+        if (const char *error = setZhongTaikoOverride(enabled, flash_id)) {
+            printf("EDITION_ERROR:%s:%06lX\n", error, static_cast<unsigned long>(flash_id));
+        } else {
+            printf("Edition:%s\n", getFirmwareEdition());
+        }
+        stdio_flush();
+        break;
+    }
+
     case Command::ClearPS4Auth:
         m_settings_store.clearPS4AuthCredentials();
         m_settings_store.scheduleReboot(false);

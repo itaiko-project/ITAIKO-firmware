@@ -29,6 +29,7 @@ namespace Doncon::Utils {
  * - Send "4002" to clear stored PS4 auth credentials (reboots on success)
  * - Send "4003" to export stored PS4 auth credentials (serial hex, signature hex, key PEM base64)
  * - Send "5000" to query OLED detection (returns DISPLAY_STATUS:PRESENT or :ABSENT)
+ * - Send "6000" to query the active edition, "6001" to enable the ZhongTaiko override, or "6002" to clear it
  * - In write mode, send "key:value" pairs (e.g., "0:800")
  *
  * Configuration Keys (46 total, keys 0-45):
@@ -162,6 +163,9 @@ class SerialConfig {
         ClearPS4Auth = 4002,
         ExportPS4Auth = 4003,
         QueryDisplay = 5000,
+        QueryEdition = 6000,
+        EnableZhongTaiko = 6001,
+        ClearZhongTaiko = 6002,
     };
 
     void handleCommand(int command_value);

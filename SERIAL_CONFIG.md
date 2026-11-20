@@ -35,6 +35,20 @@ The system uses a simple command-based protocol:
 - **4002** - Clear stored PS4 auth credentials (responds with `PS4_AUTH_CLEARED`, then reboots)
 - **4003** - Export stored PS4 auth credentials (see response format below)
 
+**Edition Commands**
+
+Send each command as a line over USB serial.
+
+| Command | Action |
+|---------|--------|
+| `6000` | Read the active edition |
+| `6001` | Enable the ZhongTaiko override |
+| `6002` | Clear the override and use GPIO25 for edition selection |
+
+Each command reports `Edition:ZhongTaiko` or `Edition:iTAIKO`. Changes take effect immediately.
+The override uses a dedicated flash security register on supported chips and survives a main-flash erase.
+A failed write returns `EDITION_ERROR:<reason>:<JEDEC ID>`.
+
 ### Setting Keys
 
 **Trigger Thresholds:**
